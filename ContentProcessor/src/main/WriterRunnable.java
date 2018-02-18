@@ -1,5 +1,6 @@
 package main;
 
+//testing commit.
 
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
@@ -59,7 +60,7 @@ public class WriterRunnable implements Runnable{
 			//initialize blob and queue connections
 			MoreoverBlobOperator blobOperator = new MoreoverBlobOperator();
 			MoreoverQueueOperator queueOp = new MoreoverQueueOperator();
-			blobOperator.connect(blobOperator.CONTENT_CONTAINER);
+			blobOperator.connect(MoreoverBlobOperator.CONTENT_CONTAINER);
 			queueOp.connectQueue(QUEUE_FINAL);
 			
 			while (!terminate) {
@@ -77,7 +78,7 @@ public class WriterRunnable implements Runnable{
 				
 				//write to blob
 				String blobName = "article-"+row.sequenceId;
-				blobOperator.writeBlob(blobOperator.CONTENT_CONTAINER, blobName, nextArticle); 
+				blobOperator.writeBlob(MoreoverBlobOperator.CONTENT_CONTAINER, blobName, nextArticle); 
 				
 				//write article to database
 				writeArticle(row);
