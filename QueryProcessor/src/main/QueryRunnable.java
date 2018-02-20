@@ -64,7 +64,7 @@ public class QueryRunnable implements Runnable {
 			if (queueNum >= QUEUECOUNT || queueNum < 0) { 
 				throw new Exception("cacheNum invalid, or not specified  (" + queueNum + ")");
 			}
-			threadStamp = "(query queue" + queueNum + ") ";;
+			threadStamp = "(query queue_" + queueNum + ") ";;
 			if (articleChain == null || seqIdChain == null || seqId == null || chrome == null) {
 				throw new Exception("not all parameters were properly initialized");
 			}		
@@ -106,7 +106,7 @@ public class QueryRunnable implements Runnable {
 	}
 	
 	/*================================================================================
-	 * COMPLEX FUNCTIONS
+	 * COMPLEX FUNCTIONS ************************************************************
 	 *===============================================================================*/
 	/*===============================================================================*/
 	/*================================================================================
@@ -177,7 +177,7 @@ public class QueryRunnable implements Runnable {
 
 	}
 	/*================================================================================
-	 * SIMPLE FUNCTIONS
+	 * SIMPLE FUNCTIONS **************************************************************
 	 *===============================================================================*/
 	/*===============================================================================*/
 	/*================================================================================

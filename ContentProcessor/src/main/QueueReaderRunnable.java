@@ -28,9 +28,10 @@ import xmlparser.Types.XMLNode;
 /*TODO: should be able to dequeue many at a time. this is a change that must be made in
 		AzureStorageConnect in the database workspace.
 */
-public class CacheReaderRunnable implements Runnable {
+public class QueueReaderRunnable implements Runnable {
 	
-	public int cacheNum = -1;
+	//parameters
+	public int queueNum = -1;
 	public HashMap<String,Integer> genericNameMap = null;
 	public HashMap<String,Integer> productMap = null;
 	public HashMap<String,Integer> combinationIdMap = null;
@@ -39,27 +40,26 @@ public class CacheReaderRunnable implements Runnable {
 	public boolean terminate = false;
 	public Exception exc = null;
 	
-	public static final int CACHECOUNT = 20;
+	//return values
+	public long exceptionCount = 0;
+	public long articleCount = 0;
 	
+	//fixed parameters
+	public static final int QUEUECOUNT = 20;
+	public static final int SLEEP_TIME_MILLIS = 2000;
+	public static final int SNIPPET_LENGTH = 1000;
 	public static final String QUEUE_PREFIX = "moreover-queue-";
 	public static final String QUEUE_FINAL = "moreover-queue-final";
-	public static final int READ_LIMIT = 500;
-	public static final int SLEEP_TIME_MILLIS = 2000;
-	public static final int REPORT_COUNT = 100;
-	
 	public static final String DOCUMENT_TYPE = "news";
 	public static final String CONTENT_KEY = "content";
 	public static final String SNIPPET_KEY = "summary";
 	public static final String IMAGE_KEY = "image";
 	public static final String RELEVANCY_KEY = "relevancy_scope";
 	public static final String SOURCE_LOGO_KEY = "source_logo";
-	public static final int SNIPPET_LENGTH = 1000;
-	
 	public static final String RELEVANCY_TITLE_VAL = "title";
 	public static final String RELEVANCY_CONTENT_VAL = "content";
 	
-	public int exceptionCount = 0;
-	
+	//parsing/writing parameters
 	public MoreoverBlobOperator blobOperator;
 	private FieldChainInterpreter inter = new FieldChainInterpreter();	
 	public List<FieldChain> chainList = inter.GetChainsDirect(new ArrayList<>(Arrays.asList(
@@ -77,8 +77,8 @@ public class CacheReaderRunnable implements Runnable {
 			"TEXT,location,country"
 	)));
 		
-	public String cacheThreadStamp;
-	
+	public String threadStamp;
+	//TODO: count total articles processed.
 	/*================================================================================
 	 * run
 	 *===============================================================================*/
@@ -86,21 +86,21 @@ public class CacheReaderRunnable implements Runnable {
 	public void run() {
 		
 		//check to make sure parameters were properly initialized
-		if (cacheNum >= CACHECOUNT || cacheNum < 0) { 
-			System.out.println("cacheNum not specified, "
-					+ "or invalid cacheNum specified (" + cacheNum + ")");
+		if (queueNum >= QUEUECOUNT || queueNum < 0) { 
+			System.out.println("queueNum not specified, "
+					+ "or invalid queueNum specified (" + queueNum + ")");
 			return;
 		} 
-		cacheThreadStamp = "(reader cache_" + cacheNum + ") ";
+		threadStamp = "(reader queue_" + queueNum + ") ";
 		if (genericNameMap == null || productMap == null || combinationIdMap == null) {
-			System.out.println(cacheThreadStamp + "drug lists not initialized. value is null (" + cacheNum + ")");
+			printToConsole("drug lists not initialized. value is null (" + queueNum + ")");
 			return;
 		} else if (categoryList == null || editorialRankList == null) {
-			System.out.println(cacheThreadStamp + "sources not initialized. value is null (" + cacheNum + ")");
+			printToConsole("sources not initialized. value is null (" + queueNum + ")");
 			return;
 		}
 		
-		System.out.println(cacheThreadStamp + "running cache reader");		
+		printToConsole("running queue reader");		
 		
 		try {			
 			
@@ -109,12 +109,11 @@ public class CacheReaderRunnable implements Runnable {
 			blobOperator.connect(MoreoverBlobOperator.CONTENT_CONTAINER);
 			blobOperator.connect(MoreoverBlobOperator.SUMMARY_CONTAINER);
 			MoreoverQueueOperator queueOp = new MoreoverQueueOperator();
-			String queueName = QUEUE_PREFIX + cacheNum;
+			String queueName = QUEUE_PREFIX + queueNum;
 			queueOp.connectQueue(queueName);
 			queueOp.connectQueue(QUEUE_FINAL);
 			
 			//continuously dequeue and process messages until termination
-			int repCount = 0;
 			while (!terminate) {
 				try {
 					//dequeue next message
@@ -125,7 +124,7 @@ public class CacheReaderRunnable implements Runnable {
 						Thread.sleep(SLEEP_TIME_MILLIS);
 						continue;
 					}
-					repCount++;
+					articleCount++;
 					
 					//extract data and check if relevant
 					MoreoverArticle row = extractData(nextArticle);
@@ -133,25 +132,20 @@ public class CacheReaderRunnable implements Runnable {
 					
 					//if relevant, write to final queue
 					if (drugFound != null) {				
-						System.out.println(cacheThreadStamp + "RELEVANT ARTICLE FOUND: " 
-								+ drugFound);
+						printToConsole("RELEVANT ARTICLE FOUND (" + drugFound + ")");
 						writeToStorage(nextArticle, row);
 					}
 					
 					//delete message from queue
 					queueOp.deleteLast(queueName);
-					
-					if (repCount%100 == 0) {
-						System.out.println(cacheThreadStamp + "processed " + repCount + " articles");
-					}
 				}
 				catch (Exception e) {
 					//Exceptions here:
-					System.out.println(cacheThreadStamp + "exception: " + e.getMessage());
+					printToConsole("exception: " + e.getMessage());
 					e.printStackTrace();
 					
 					try { queueOp.deleteLast(queueName); }
-					catch (Exception e1) { System.out.println("exception: failed to delete last queue item"); }
+					catch (Exception e1) { printToConsole("exception: failed to delete last queue item"); }
 					
 					exceptionCount+=1;
 				}
@@ -165,10 +159,13 @@ public class CacheReaderRunnable implements Runnable {
 		}
 		
 		if (terminate) {
-			System.out.println(cacheThreadStamp + "thread terminated");
+			printToConsole("thread terminated");
 		}
 		
 	}	
+	/*================================================================================
+	 * COMPLEX FUNCTIONS ************************************************************
+	 *===============================================================================*/
 	/*================================================================================
 	 * checkRelevantArticle: checks whether or not article is desired/relevant. If
 	 * relevant, returns drug name that was found, otherwise returns null.
@@ -191,8 +188,6 @@ public class CacheReaderRunnable implements Runnable {
 		}
 		if (!categoryMatch || !rankMatch) {
 			return null;
-		} else {
-			System.out.println(article.category + "-" + article.editorialRank);
 		}
 		
 		for (String drug: genericNameMap.keySet()) {
@@ -371,6 +366,15 @@ public class CacheReaderRunnable implements Runnable {
 		con.CommitClose();
 		
 		return true;
+	}
+	/*================================================================================
+	 * SIMPLE FUNCTIONS **************************************************************
+	 *===============================================================================*/
+	/*================================================================================
+	 * printToConsole: prints a string to the console, including thread identification
+	 *===============================================================================*/
+	protected void printToConsole(String statement) {
+		System.out.println(threadStamp + statement);
 	}
 	
 	

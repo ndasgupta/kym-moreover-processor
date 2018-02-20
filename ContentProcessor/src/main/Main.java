@@ -17,8 +17,7 @@ import dbconnect.main.DBConnect;
 public class Main {
 
 	public static final int MILLIS_PER_MINUTE = 60000;
-	public static final int FIXED_RUN_TIME_MINUTES = 12;
-	public static final int FIXED_RUN_TIME_MILLIS = FIXED_RUN_TIME_MINUTES*MILLIS_PER_MINUTE;
+	public static final int THREAD_SLEEP_TIME_MILLIS = 1*MILLIS_PER_MINUTE;
 	public static final String mainThreadStamp = "(reader main) ";
 	public static final List<String> categoryList = new  ArrayList<>(Arrays.asList(
 			"academic",
@@ -38,16 +37,19 @@ public class Main {
 			+ "and b.combination_id = c.id "
 			+ "and d.combination_id = c.id";
 	
-	public static final int CACHECOUNT = 20;
+	public static final int QUEUECOUNT = 20;
 
 	
 	//TODO: write articles in new threads. 
 	
+	/*================================================================================
+	 * main
+	 *===============================================================================*/
 	public static void main(String[] args) {
 		
 		//initialize maps so all runnables and threads can be accurately referenced
-		HashMap<Integer,CacheReaderRunnable> runnableMap = 
-				new HashMap<Integer,CacheReaderRunnable>();
+		HashMap<Integer,QueueReaderRunnable> runnableMap = 
+				new HashMap<Integer,QueueReaderRunnable>();
 		HashMap<Integer,Thread> threadMap = new HashMap<Integer,Thread>();
 		
 		long startTime = System.currentTimeMillis();
@@ -58,14 +60,12 @@ public class Main {
 			HashMap<String,Integer> genericNameMap = readGenList(combinationIdMap);
 			HashMap<String,Integer> productMap = readProdList(genericNameMap,combinationIdMap);
 			
-			
-
-			System.out.println(mainThreadStamp + "combination ids found: " + combinationIdMap.size());
+			printToConsole("combination ids found: " + combinationIdMap.size());
 						
-			//initialize cache reader threads, and index them in the maps
-			for (int i = 0; i < CACHECOUNT; i++) {
-				CacheReaderRunnable reader = new CacheReaderRunnable();
-				reader.cacheNum = i;
+			//initialize queue reader threads, and index them in the maps
+			for (int i = 0; i < QUEUECOUNT; i++) {
+				QueueReaderRunnable reader = new QueueReaderRunnable();
+				reader.queueNum = i;
 				reader.genericNameMap = genericNameMap;
 				reader.productMap = productMap;
 				reader.combinationIdMap = combinationIdMap;
@@ -82,33 +82,29 @@ public class Main {
 			//TODO: check if any thread has been terminated (exception outside loop). restart it if so.
 			while (true) {
 				int exceptionCount = 0;
-				for (CacheReaderRunnable r: runnableMap.values()) {
+				for (QueueReaderRunnable r: runnableMap.values()) {
 					exceptionCount+=r.exceptionCount;
 				}
-				Thread.sleep(60000);
+				Thread.sleep(THREAD_SLEEP_TIME_MILLIS);
+				
+				int articleCount = 0;
+				for (QueueReaderRunnable qr: runnableMap.values()) {
+					articleCount += qr.articleCount;
+				}
+				printToConsole("processed article count: " + articleCount);
 				printCurrentRunTime(startTime, "current run time (" + exceptionCount 
 						+ ") exceptions");
 			}
 			
 		} catch (Exception e) {
-			System.out.println(mainThreadStamp + "CONTENTPROCESSOR MAIN THREAD EXCEPTION");
+			printToConsole("CONTENTPROCESSOR MAIN THREAD EXCEPTION");
 			e.printStackTrace();
 		}
 		
 	}
 	/*================================================================================
-	 * checkTimeLimit
+	 * COMPLEX FUNCTIONS ************************************************************
 	 *===============================================================================*/
-	protected static boolean checkTimeLimit(long startTime) throws Exception{		
-		if (getCurrentRunTime(startTime) >= FIXED_RUN_TIME_MILLIS) {
-			System.out.println(mainThreadStamp + "time limit reached (" 
-					+ FIXED_RUN_TIME_MINUTES + " min). terminating threads.");
-			return true;
-		}
-		
-		return false;
-	}
-	
 	/*================================================================================
 	 * readGenList: compiles list of unique drugs
 	 *===============================================================================*/
@@ -136,10 +132,8 @@ public class Main {
 			combIdMap.put(temp_drugname, rsGen.getInt("combination_id"));
 		}
 		
-		System.out.println(mainThreadStamp + "read " + genMap.size() + " generic names");			
-
-		System.out.println(mainThreadStamp + "run time:  " + 
-				((System.currentTimeMillis() - startTime)/1000) + " sec");	
+		printToConsole("read " + genMap.size() + " generic names");			
+		printToConsole("run time:  " + ((System.currentTimeMillis() - startTime)/1000) + " sec");	
 		
 		return genMap;
 	}
@@ -183,10 +177,8 @@ public class Main {
 			combIdMap.put(temp_drugname, rsProd.getInt("combination_id"));	
 		}
 		
-		System.out.println(mainThreadStamp + "read " + prodMap.size() + " product names");			
-
-		System.out.println(mainThreadStamp + "run time:  " + 
-				((System.currentTimeMillis() - startTime)/1000) + " sec");	
+		printToConsole("read " + prodMap.size() + " product names");			
+		printToConsole("run time:  " + ((System.currentTimeMillis() - startTime)/1000) + " sec");	
 		
 		return prodMap;
 	}
@@ -220,11 +212,8 @@ public class Main {
 			sourceMap.put(temp_sourceId, temp_sourceName);
 		}
 		
-		System.out.println(mainThreadStamp + "read " + sourceMap.size() + 
-				" sources from moreover_sources table");			
-
-		System.out.println(mainThreadStamp + "run time:  " + 
-				((System.currentTimeMillis() - startTime)/1000) + " sec");	
+		printToConsole("read " + sourceMap.size() + " sources from moreover_sources table");			
+		printToConsole("run time:  " + ((System.currentTimeMillis() - startTime)/1000) + " sec");	
 		
 		return sourceMap;
 	}
@@ -250,6 +239,15 @@ public class Main {
 
 	}
 	/*================================================================================
+	 * SIMPLE FUNCTIONS **************************************************************
+	 *===============================================================================*/
+	/*================================================================================
+	 * databaseConnection
+	 *===============================================================================*/
+	protected static void connectToDatabase(DBConnect connect) throws Exception {
+		connect.ConnectProd();
+	}
+	/*================================================================================
 	 * getCurrentRunTime
 	 *===============================================================================*/
 	protected static long getCurrentRunTime(long startTime) {
@@ -262,14 +260,14 @@ public class Main {
 		DecimalFormat df = new DecimalFormat("#.00");
 		long runTime = (System.currentTimeMillis() - startTime)/1000;
 		String runTimeString = df.format(runTime);
-		System.out.println(mainThreadStamp + text + ": " + runTimeString + " sec");
+		printToConsole(text + ": " + runTimeString + " sec");
 		return runTime;
 	}
 	/*================================================================================
-	 * databaseConnection
+	 * printToConsole: prints a string to the console, including thread identification
 	 *===============================================================================*/
-	protected static void connectToDatabase(DBConnect connect) throws Exception {
-		connect.ConnectProd();
+	protected static void printToConsole(String statement) {
+		System.out.println(mainThreadStamp + statement);
 	}
 	
 }
