@@ -86,8 +86,7 @@ public class Main {
 				} else { printToConsole("call frequency wait time exceeded."); }
 				
 				//intialize and run query, recording start time
-				QueryRunnable querier = new QueryRunnable();
-				executeQueryRunnable(querier, (int)(i%QUEUECOUNT), currSeqId, chromeClient);
+				QueryRunnable querier = executeQueryRunnable((int)(i%QUEUECOUNT), currSeqId, chromeClient);
 				lastQueryStart = System.currentTimeMillis();
 				
 				//put in map for later access
@@ -108,7 +107,7 @@ public class Main {
 				
 				//print statements to keep track of operation.
 				printToConsole("iteration complete. count: " + i);
-				if (i%20 == 0) {
+				if (i%QUEUECOUNT == 0) {
 					printToConsole("exception count: " + exceptionCount);
 					printCurrentRunTimeDays(globalStartTime, "current run time: ");
 				}
@@ -129,10 +128,10 @@ public class Main {
 	/*================================================================================
 	 * getCurrentRunTime: given start time, returns current run time in seconds
 	 *===============================================================================*/
-	protected static long getCurrentRunTimeMillis(long startTime) {
+	protected static long getCurrentRunTimeMillis(long startTime) throws Exception {
 		return (System.currentTimeMillis() - startTime);
 	}
-	protected static long getCurrentRunTimeSec(long startTime) {
+	protected static long getCurrentRunTimeSec(long startTime) throws Exception {
 		return (System.currentTimeMillis() - startTime)/MILLIS_PER_SEC;
 	}
 	/*================================================================================
@@ -144,24 +143,24 @@ public class Main {
 		return new WebClient(BrowserVersion.CHROME);
 	}
 	/*================================================================================
-	 * printCurrentRunTime: given start time, prints current run time in seconds.
-	 * 		precision values: 1=sec;2=hrs;3=days;
+	 * printCurrentRunTime: given start time, prints current run time in the specified
+	 * unit of measurement.
 	 *===============================================================================*/
-	protected static long printCurrentRunTimeSec(long startTime, String text) {
+	protected static long printCurrentRunTimeSec(long startTime, String text) throws Exception {
 		DecimalFormat df = new DecimalFormat("#.00");
 		long runTime = (System.currentTimeMillis() - startTime)/MILLIS_PER_SEC;		
 		String runTimeString = df.format(runTime);
 		printToConsole(text + ": " + runTimeString + " sec");
 		return runTime;
 	}
-	protected static long printCurrentRunTimeHours(long startTime, String text) {
+	protected static long printCurrentRunTimeHours(long startTime, String text) throws Exception {
 		DecimalFormat df = new DecimalFormat("#.00");
 		long runTime = (System.currentTimeMillis() - startTime)/MILLIS_PER_HOUR;		
 		String runTimeString = df.format(runTime);
 		printToConsole(text + ": " + runTimeString + " hours");
 		return runTime;
 	}
-	protected static long printCurrentRunTimeDays(long startTime, String text) {
+	protected static long printCurrentRunTimeDays(long startTime, String text) throws Exception {
 		DecimalFormat df = new DecimalFormat("#.000");
 		long runTime = (System.currentTimeMillis() - startTime)/MILLIS_PER_DAY;		
 		String runTimeString = df.format(runTime);
@@ -177,8 +176,9 @@ public class Main {
 	/*================================================================================
 	 * executeQueryRunnable: intialize QueryRunnable parameter, and runs as a thread
 	 *===============================================================================*/
-	protected static void executeQueryRunnable(QueryRunnable qr, int queueNum, String seqId, 
-			WebClient client) {
+	protected static QueryRunnable executeQueryRunnable(int queueNum, String seqId, 
+	WebClient client) throws Exception {
+		QueryRunnable qr = new QueryRunnable();
 		qr.queueNum = queueNum;
 		qr.seqId = seqId;
 		qr.articleChain = articleChainMaster;
@@ -186,6 +186,7 @@ public class Main {
 		qr.chrome = client;
 		Thread t = new Thread(qr);
 		t.start();
+		return qr;
 	}
 	
 	/*================================================================================
@@ -194,7 +195,7 @@ public class Main {
 	/*================================================================================
 	 * printQueuesizes: prints sizes of all queues
 	 *===============================================================================*/
-	protected static void printQueuesizes() {
+	protected static void printQueueSizes() throws Exception {
 		String queuePrefix = "moreover-queue-";
 		MoreoverQueueOperator queueOp = new MoreoverQueueOperator();
 		for (int i = 0; i < QUEUECOUNT; i++) {

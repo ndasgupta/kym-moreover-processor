@@ -1,51 +1,60 @@
 package main;
 
-//testing commit.
 
-import java.sql.Timestamp;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
-
+import java.util.Vector;
 
 import blob.moreover.MoreoverBlobOperator;
+import dbconnect.general.document_attributes_row;
+import dbconnect.general.document_attributes_statements;
+import dbconnect.general.document_relation_row;
+import dbconnect.general.document_relation_statements;
+import dbconnect.general.document_row;
+import dbconnect.general.document_statements;
 
-import dbconnect.general.moreover_article_row;
-import dbconnect.general.moreover_article_statements;
 import dbconnect.main.DBConnect;
-import queue.moreover.MoreoverQueueOperator;
-import xmlparser.AuxFileHandling.FieldChainInterpreter;
-import xmlparser.Operations.XMLOperator;
-import xmlparser.Types.FieldChain;
-import xmlparser.Types.XMLNode;
 
+/*================================================================================
+ * WriterRunnable
+ * 
+ * writes articles to the database and to blob storage. In each iteration of the 
+ * loop, two blob storage writes and one database write take place. This is because:
+ *  
+ * 1. blobs cannot be written in batches, so no time would be saved by grouping them 
+ * together.
+ * 2. the id value of the document row is required as part of the other database 
+ * attributes, and is only generated after insertion.
+ * 
+ * the other two inserts (for attriubutes & relations) are grouped together and
+ * executed at the end. this turns what used to be two database writes per article
+ * into two overall.
+ *===============================================================================*/
 public class WriterRunnable implements Runnable{
 
-	public boolean terminate = false;
-	public Exception exc = null;
+	//parameters
+	List<MoreoverArticle> writeList = null;
+	public HashMap<String,Integer> genericNameMap = null;
+	public HashMap<String,Integer> productMap = null;
+	public HashMap<String,Integer> combinationIdMap = null;	
 	
-	public static final String QUEUE_FINAL = "moreover-queue-final";
-	public static final int READ_LIMIT = 500;
-	public static final int SLEEP_TIME_MILLIS = 20000;
+	//return values
+	public boolean threadCompleted = false;
+	public boolean exceptionFound = false;
 	
-	private FieldChainInterpreter inter = new FieldChainInterpreter();	
-	public List<FieldChain> chainList = inter.GetChainsDirect(new ArrayList<>(Arrays.asList(
-			"TEXT,sequenceId",
-			"TEXT,title",
-			"TEXT,content",
-			"TEXT,publishedDate",
-			"TEXT,estimatedPublishedDate",
-			"TEXT,url",
-			"TEXT,source,id",
-			"TEXT,source,name",
-			"TEXT,source,homeUrl",
-			"TEXT,location,country"
-	)));
-		
-	public String writerThreadStamp = "(writer) ";
+	//fixed parameters
+	public String writerThreadStamp = "(reader writer) ";
+	public static final int WRITE_LIMIT = 100;
+	public static final int MAX_DB_WRITE = 1000;
+	public static final int SNIPPET_LENGTH = 1000;
+	public static final String DOCUMENT_TYPE = "news";
+	public static final String CONTENT_KEY = "content";
+	public static final String SNIPPET_KEY = "summary";
+	public static final String IMAGE_KEY = "image";
+	public static final String RELEVANCY_KEY = "relevancy_scope";
+	public static final String SOURCE_LOGO_KEY = "source_logo";
+	
+	//TODO: must retrieve image/logo blobs as well.
 	
 	/*================================================================================
 	 * run
@@ -53,112 +62,174 @@ public class WriterRunnable implements Runnable{
 	@Override
 	public void run() {
 		
-		System.out.println(writerThreadStamp + "running writer");
-		
 		try {
 			
-			//initialize blob and queue connections
-			MoreoverBlobOperator blobOperator = new MoreoverBlobOperator();
-			MoreoverQueueOperator queueOp = new MoreoverQueueOperator();
-			blobOperator.connect(MoreoverBlobOperator.CONTENT_CONTAINER);
-			queueOp.connectQueue(QUEUE_FINAL);
+			checkParameters();
 			
-			while (!terminate) {
+			printToConsole("writer verified. writing " + writeList.size() + " articles...");
+			
+			//write articles
+			List<document_attributes_row> attributesListFinal = new Vector<document_attributes_row>();
+			List<document_relation_row> relationsListFinal = new Vector<document_relation_row>();
+			MoreoverBlobOperator blobOperator = new MoreoverBlobOperator();
+			DBConnect con = new DBConnect();
+			connectAll(blobOperator, con);
+			
+			for (MoreoverArticle article: writeList) {
+			
+				//Write blob info first, so that generated urls can be used in attributes
+				String blobUrl = blobOperator.writeBlob(MoreoverBlobOperator.CONTENT_CONTAINER, 
+						"article-"+article.sequenceId+".xml", article.fullXml);
+				String summaryBlobUrl = blobOperator.writeBlob(MoreoverBlobOperator.SUMMARY_CONTAINER, 
+						"article-"+article.sequenceId+".xml", article.fullXml.substring(0,SNIPPET_LENGTH));
 				
-				//dequeue next message
-				String nextArticle = null;
-				try  { nextArticle = queueOp.dequeue(QUEUE_FINAL); }
-				catch (NullPointerException ne) {
-					Thread.sleep(SLEEP_TIME_MILLIS);
-					continue;
+				//initialize database rows
+				document_row doc = initDocumentRow(article);
+				document_attributes_row docContent = initAttributeRow(CONTENT_KEY, blobUrl, null);
+				document_attributes_row docSummary = initAttributeRow(SNIPPET_KEY, summaryBlobUrl, null);
+				document_attributes_row docRelevancy = initAttributeRow(
+						RELEVANCY_KEY, null, article.relevanceValue);
+				List<document_relation_row> relations = initRelationsRows(article);
+				
+				//connect and write document row, retreiving the id of the inserted row
+				String docStatement = document_statements.InsertRow(doc);
+				int docId = con.ExecuteGetId(docStatement, "id");
+				
+				//update the other data rows with the returned id
+				docContent.doc_id = docId;
+				docSummary.doc_id = docId;
+				docRelevancy.doc_id = docId;
+				for (document_relation_row r: relations) {
+					r.document_id = docId;
 				}
 				
-				//extract data and write to database
-				moreover_article_row row = extractData(nextArticle);
+				//add relations and attributes rows to final lists for end write.
+				attributesListFinal.add(docContent);
+				attributesListFinal.add(docSummary);
+				attributesListFinal.add(docRelevancy);
+				relationsListFinal.addAll(relations);
 				
-				//write to blob
-				String blobName = "article-"+row.sequenceId;
-				blobOperator.writeBlob(MoreoverBlobOperator.CONTENT_CONTAINER, blobName, nextArticle); 
-				
-				//write article to database
-				writeArticle(row);
-				
-				//delete message from queue
-				queueOp.deleteLast(QUEUE_FINAL);
 			}
+
+			//execute final insert for all attribute and relation rows.
+			writeAttributeListFinal(con, attributesListFinal);
+			writeRelationListFinal(con, relationsListFinal);
 			
-		} catch (Exception e) { 
-			exc = e;
+			con.CommitClose();
+			
+			//declare completion.
+			
+		}
+		catch(Exception e) {
+			exceptionFound = true;
+			printToConsole("exception: " + e.getMessage());
 			e.printStackTrace();
-			terminate = true;
 		}
 		
-		if (terminate) {
-			System.out.println(writerThreadStamp + "thread terminated");
-		}
+		threadCompleted = true;
 		
 	}	
-
 	/*================================================================================
-	 * extractData: given an xml article as a string, parses and returns desired content.
+	 * checkParameters: checks that parameters have been properly initialized and throws
+	 * exception if not.
 	 *===============================================================================*/
-	protected moreover_article_row extractData(String contents) throws Exception {
-		
-		XMLOperator parser = new XMLOperator();
-		moreover_article_row row = new moreover_article_row();
-		
-		HashMap<FieldChain, List<XMLNode>> nodeMap = parser.FieldChainParseString(contents,
-				chainList);
-		HashMap<String, String> dataMap = parser.IdentifyAllMap(nodeMap);
-		row.sequenceId = Long.parseLong(dataMap.get("sequenceId"));
-		row.title = dataMap.get("title");
-		row.content = dataMap.get("content");
-		row.url = dataMap.get("url");
-		try { 
-			row.sourceId = Integer.parseInt(dataMap.get("id")); 
-		} catch (Exception e) { row.sourceId = 0; }
-		row.sourceName = dataMap.get("name");
-		row.sourceUrl = dataMap.get("homeUrl");
-		row.country = dataMap.get("country");
-		//try to extract publish date.
-		try { 
-			row.publishDate = new Timestamp((new SimpleDateFormat("yyyy-MM-dd")).parse(
-					dataMap.get("publishedDate").substring(0,9)).getTime());
-		} catch (Exception e) { 
-			try { 
-				row.publishDate = new Timestamp((new SimpleDateFormat("yyyy-MM-dd")).parse(
-						dataMap.get("estimatedPublishedDate").substring(0,9)).getTime());
-			} catch (Exception e1) { row.publishDate = null; }		
+	public void checkParameters() throws Exception {
+		if (writeList == null) {
+			throw new Exception("write list not initialized");
 		}
-		row.recordDate = new Timestamp(new Date().getTime());
-		
+		if (writeList.size() > WRITE_LIMIT) {
+			throw new Exception("max write limit (" + WRITE_LIMIT + 
+					") exceeded. list size: " + writeList.size());
+		} else if (genericNameMap == null || productMap == null || combinationIdMap == null) {
+			throw new Exception("drug lists not initialized. value is null");
+		}
+	}
+	/*================================================================================
+	 * connectAll: connects to cloud storage and database.
+	 *===============================================================================*/
+	public void connectAll(MoreoverBlobOperator blobOperator, DBConnect con) throws Exception {
+		blobOperator.connect(MoreoverBlobOperator.CONTENT_CONTAINER);
+		blobOperator.connect(MoreoverBlobOperator.SUMMARY_CONTAINER);
+		Main.connectToDatabase(con);
+	}
+	/*================================================================================
+	 * row initalizers: functions to initialize database row objects
+	 *===============================================================================*/
+	public document_row initDocumentRow(MoreoverArticle article) throws Exception {
+		document_row row = new document_row();
+		row.type = DOCUMENT_TYPE;
+		row.url = article.url;
+		row.date = article.publishDate;
+		row.title = article.title;
 		return row;
 	}
-
-	/*================================================================================
-	 * writeArticle: writes a list of articles to the database
-	 *===============================================================================*/
-	protected void writeArticle(moreover_article_row article) throws Exception {
-		String statement = moreover_article_statements.InsertRow(article);
-		DBConnect con = new DBConnect();
-		con.ConnectProd();
-		con.ExecuteStatement(statement);
-		con.CommitClose();
+	public document_attributes_row initAttributeRow(String key, String blobUrl, String value) 
+	throws Exception {
+		document_attributes_row row = new document_attributes_row();
+		row.key = key;
+		row.blob_url = blobUrl;
+		row.value = value;
+		return row;
+	}
+	public List<document_relation_row> initRelationsRows(MoreoverArticle article) 
+	throws Exception {
+		List<document_relation_row> relations = new Vector<document_relation_row>();
+		for (String s: article.drugsFound) {
+			document_relation_row docRel = new document_relation_row();
+			docRel.generic_name_id = genericNameMap.get(s);
+			docRel.product_id = productMap.get(s);
+			docRel.combination_id = combinationIdMap.get(s);
+			relations.add(docRel);
+		}
+		return relations;
 	}
 
 	/*================================================================================
-	 * writeArticles: writes a list of articles to the database
+	 * printToConsole: prints a string to the console, including thread identification
 	 *===============================================================================*/
-	protected void writeArticles(List<moreover_article_row> articles) throws Exception {
-		String statement = moreover_article_statements.InsertRows(articles);
-		DBConnect con = new DBConnect();
-		con.ConnectProd();
-		con.ExecuteStatement(statement);
-		con.CommitClose();
+	protected void printToConsole(String statement) {
+		System.out.println(writerThreadStamp + statement);
 	}
-
 	
-	
+	/*================================================================================
+	 * writeFinalLists: writes final attribute and relation lists, accounting for the
+	 * possibility that their size exceeds maximum.
+	 *===============================================================================*/
+	protected void writeAttributeListFinal(DBConnect con, List<document_attributes_row> attributesList) 
+	throws Exception {
+		
+		//loop construct and execute attribute statements, in batches determined by the
+		//MAX_DB_WRITE size.
+		for (int i = 0; attributesList.size() > i*MAX_DB_WRITE; i++) {
+			
+			int toIndex = 0;
+			if (attributesList.size() > (i+1)*MAX_DB_WRITE) {
+				toIndex = (i+1)*MAX_DB_WRITE;
+			} else {
+				toIndex = attributesList.size();
+			}
+			
+			String attStatement = document_attributes_statements.InsertRows(
+					attributesList.subList(i*MAX_DB_WRITE, toIndex));			
+			con.ExecuteStatement(attStatement);
+		}
+	}
+	protected void writeRelationListFinal(DBConnect con, List<document_relation_row> relationsList)
+	throws Exception {
+		
+		//identical loop for relation statements
+		for (int i = 0; relationsList.size() > i*MAX_DB_WRITE; i++) {
+			int toIndex = 0;
+			if (relationsList.size() > (i+1)*MAX_DB_WRITE) {
+				toIndex = (i+1)*MAX_DB_WRITE;
+			} else {
+				toIndex = relationsList.size();
+			}
+			String relStatement = document_relation_statements.InsertRows(
+					relationsList.subList(i*MAX_DB_WRITE, toIndex));			
+			con.ExecuteStatement(relStatement);
+		}
+	}
 
 }
 
