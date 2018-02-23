@@ -13,12 +13,6 @@ import xmlparser.Types.FieldChain;
 
 
 public class Main {
-
-	//TODO: call frequency should be at 12. must speed up reader to deal with this.
-	
-	//TODO: mechanism to send email when exceptions are encountered.
-	
-	//TODO: azure log management/log analytics. log4j. set up logging.
 	
 	//querying parameters
 	public static final int CALL_FREQUENCY_SEC = 30;
@@ -115,10 +109,8 @@ public class Main {
 			} catch(Exception e) {				
 				printToConsole("EXCEPTION: " + e.getMessage() + ". iteration count = " + i);	
 			}
-		}
 			
-		//TODO: should be a notification here that the querier is no longer running.
-		
+		}		
 	}
 	
 

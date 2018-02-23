@@ -53,9 +53,7 @@ public class WriterRunnable implements Runnable{
 	public static final String IMAGE_KEY = "image";
 	public static final String RELEVANCY_KEY = "relevancy_scope";
 	public static final String SOURCE_LOGO_KEY = "source_logo";
-	
-	//TODO: must retrieve image/logo blobs as well.
-	
+		
 	/*================================================================================
 	 * run
 	 *===============================================================================*/

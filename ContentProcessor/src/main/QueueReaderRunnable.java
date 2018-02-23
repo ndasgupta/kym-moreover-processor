@@ -19,9 +19,7 @@ import xmlparser.Operations.XMLOperator;
 import xmlparser.Types.FieldChain;
 import xmlparser.Types.XMLNode;
 
-/*TODO: should be able to dequeue many at a time. this is a change that must be made in
-		AzureStorageConnect in the database workspace.
-*/
+
 /*================================================================================
  * QueueReaderRunnable
  * 

@@ -19,8 +19,17 @@ import queue.moreover.MoreoverQueueOperator;
 import xmlparser.AuxFileHandling.FieldChainInterpreter;
 import xmlparser.Types.FieldChain;
 
-//TODO: not currently set up to read all info. Check notes to complete this.
-
+/*
+ * TODO: incorporate conditions in relevance check.
+ * TODO: not currently set up to read all info. Check notes to complete this. (image/logo blobs)
+ * TODO: check if any thread has been terminated (exception outside loop). restart it if so.
+ * TODO: increase speed. content processor reading about 500 articles per minute, so
+ * 		the queries must be set slower to compensate. should be at 500 articles every 12 seconds.
+ * 		POSSIBLE SOLUTION: TODO: should be able to dequeue many at a time. 
+ * 			this is a change that must be made in AzureStorageConnect in the database workspace.
+ * TODO: logging/send emails on exceptions.
+ * 		azure log management/log analytics. log4j.
+*/
 /*================================================================================
  *ContentProcessor
  *
