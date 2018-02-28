@@ -2,19 +2,13 @@ package main;
 
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Queue;
-import java.util.Set;
 import java.util.concurrent.Semaphore;
 
-import blob.moreover.MoreoverBlobOperator;
 import queue.moreover.MoreoverQueueOperator;
-import xmlparser.AuxFileHandling.FieldChainInterpreter;
 import xmlparser.Operations.XMLOperator;
 import xmlparser.Types.FieldChain;
 import xmlparser.Types.XMLNode;
@@ -47,7 +41,11 @@ public class QueueReaderRunnable implements Runnable {
 	public List<String> categoryList = null;
 	public List<String> editorialRankList = null;
 	public List<FieldChain> chainList = null;
+	public FieldChain imageUrlKeyChain = null;
+	public FieldChain urlKeyChain = null;
 	public Exception exc = null;
+	public int keyWordMatchThreshold = -1;
+	public List<String> keyWordList;
 	
 	//return values
 	public long exceptionCount = 0;
@@ -56,7 +54,6 @@ public class QueueReaderRunnable implements Runnable {
 	
 	//fixed parameters
 	private static final int SLEEP_TIME_MILLIS = 2000;
-	private static final int MIN_DRUGNAME_LENGTH = 3;
 	public static final String QUEUE_PREFIX = "moreover-queue-";
 
 		
@@ -132,11 +129,13 @@ public class QueueReaderRunnable implements Runnable {
 			throw new Exception("drug lists not initialized. value is null (" + queueNum + ")");
 		} else if (categoryList == null || editorialRankList == null) {
 			throw new Exception("sources not initialized. value is null (" + queueNum + ")");
-		} else if (chainList == null) {
-			throw new Exception("chainList not initialized. value is null (" + queueNum + ")");
-		}else if (relevantArticleQueue == null || relevantArticleQueueLock == null) {
+		} else if (chainList == null || imageUrlKeyChain == null || urlKeyChain == null) {
+			throw new Exception("fieldChains not initialized. value is null (" + queueNum + ")");
+		} else if (relevantArticleQueue == null || relevantArticleQueueLock == null) {
 			throw new Exception("relevantArticleQueue values not initialized. "
 					+ "value is null (" + queueNum + ")");
+		} else if (keyWordList == null || keyWordMatchThreshold < 0) {
+			throw new Exception("keyword parameters not initialized" + queueNum + ")");
 		}
 	}
 	/*================================================================================
@@ -144,7 +143,8 @@ public class QueueReaderRunnable implements Runnable {
 	 * relevant, update the article to represent relevance values, and return true.
 	 *===============================================================================*/
 	protected boolean checkRelevantArticle(MoreoverArticle article) throws Exception {		
-				
+		
+		//FILTER 1: check that the article source is relevant.
 		boolean categoryMatch = false;
 		for (String c: categoryList) {
 			if (c.trim().toLowerCase().equals(article.category.trim().toLowerCase())) {
@@ -163,11 +163,27 @@ public class QueueReaderRunnable implements Runnable {
 			return false;
 		}
 		
-		//do a cursory check to determine whether or not the article has drug information
+		//FILTER 2: horizontal keyword search. only move forward if the requisite amount of
+		//keywords have appeared in the article.
+		int keyWordMatchCount = 0;
+		for (String keyWord: keyWordList) {
+			if (keyWordMatchCount >= keyWordMatchThreshold) { break; }
+			if (WriterRunnable.doesMatch(article.title, keyWord) || 
+					WriterRunnable.doesMatch(article.content, keyWord)){
+				keyWordMatchCount++;
+				continue;
+			}
+		}
+		if (keyWordMatchCount < keyWordMatchThreshold) {
+			return false;
+		}
+		
+		//FILTER 3: do a cursory check to determine whether or not the article has drug information
 		boolean isRelevant = false;
 		String firstDrugFound = null;
 		for (String drug: genericNameMap.keySet()) {
-			if (doesMatch(article.title, drug) || doesMatch(article.content, drug)){
+			if (WriterRunnable.doesMatch(article.title, drug) || 
+					WriterRunnable.doesMatch(article.content, drug)){
 				firstDrugFound = drug;
 				isRelevant = true;
 				break;
@@ -175,7 +191,8 @@ public class QueueReaderRunnable implements Runnable {
 		}	
 		if (!isRelevant) {
 			for (String drug: productMap.keySet()) {
-				if (doesMatch(article.title, drug) || doesMatch(article.content, drug)){
+				if (WriterRunnable.doesMatch(article.title, drug) || 
+						WriterRunnable.doesMatch(article.content, drug)){
 					firstDrugFound = drug;
 					isRelevant = true;
 					break;
@@ -183,45 +200,10 @@ public class QueueReaderRunnable implements Runnable {
 			}
 		}
 		
-		//if the article is determined to be relevant, do a full check, and modify the moreoever article
-		//to hold the results.
 		if (isRelevant) {
-			Set<String> namesFound = new HashSet<String>();
-			String relevanceValue = null;
-			for (String g: genericNameMap.keySet()) {
-				if (doesMatch(article.title, g) || doesMatch(article.content, g)) {
-					namesFound.add(g);
-					if (relevanceValue == null) { relevanceValue = MoreoverArticle.RELEVANCY_TITLE_VAL; }
-				}
-			}
-			for (String p: productMap.keySet()) {
-				if (doesMatch(article.title, p) || doesMatch(article.content, p)) {
-					namesFound.add(p);
-					if (relevanceValue == null) { relevanceValue = MoreoverArticle.RELEVANCY_CONTENT_VAL; }
-				}
-			}			
-			article.declareRelevant(namesFound, relevanceValue, firstDrugFound);			
-		}		
-		return isRelevant;
-	}
-	
-	/*================================================================================
-	 * doesMatch: checks a body of text 'content' for appearance of a string 'query'
-	 *===============================================================================*/
-	public static boolean doesMatch(String content, String query) {
-		
-		//return if the query is too short.
-		if( query.replaceAll("[^a-zA-Z0-9]","").trim().length() <= MIN_DRUGNAME_LENGTH){
-			return false;
-		}		
-		content = content.length() >= 1000 ? content.substring(0, 999) : content;
-		content = content.toLowerCase().replaceAll("[^a-zA-Z0-9]", "").trim();
-		
-		query = query.toLowerCase().replaceAll("[^a-zA-Z0-9]", "").trim();
-		if (content.contains(query)) {
-			return true ;
+			article.declareRelevant(firstDrugFound);
 		}
-		return false ;
+		return isRelevant;		
 	}
 	/*================================================================================
 	 * enqueueRelevantArticle: enqueues a relevant article in the relevantArticleQueue,
@@ -243,12 +225,17 @@ public class QueueReaderRunnable implements Runnable {
 		
 		HashMap<FieldChain, List<XMLNode>> nodeMap = parser.FieldChainParseString(
 				articleXml, chainList); 
-
+		
+		//retreive specifically referenced keychains.
+		try { row.url = nodeMap.get(urlKeyChain).get(0).innerXml.trim(); }
+		catch (NullPointerException e) { row.url = null; }
+		try { row.imageUrl = nodeMap.get(imageUrlKeyChain).get(0).innerXml.trim(); }
+		catch (NullPointerException e) { row.imageUrl = null; }
+		
 		HashMap<String, String> dataMap = parser.IdentifyAllMap(nodeMap);
 		row.sequenceId = Long.parseLong(dataMap.get("sequenceId"));
 		row.title = dataMap.get("title");
 		row.content = dataMap.get("content");
-		row.url = dataMap.get("url");
 		try { 
 			row.sourceId = Integer.parseInt(dataMap.get("id")); 
 		} catch (Exception e) { row.sourceId = 0; }
@@ -268,6 +255,7 @@ public class QueueReaderRunnable implements Runnable {
 		row.recordDate = new Timestamp(new Date().getTime());
 		row.category = dataMap.get("category");
 		row.editorialRank = dataMap.get("editorialRank");
+		row.sourceUrl = dataMap.get("homeUrl");
 		
 		row.fullXml = articleXml;
 		

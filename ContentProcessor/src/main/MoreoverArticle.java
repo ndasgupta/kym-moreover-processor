@@ -18,9 +18,12 @@ public class MoreoverArticle {
     public Timestamp recordDate;
     public String category;
     public String editorialRank;
+    public String imageUrl;
+    public String sourceLogoUrl;
     public String fullXml;
     
     public Set<String> drugsFound;
+    public Set<String> conditionsFound;
     public String relevanceValue;
     public String firstDrugFound;
     
@@ -45,9 +48,12 @@ public class MoreoverArticle {
 		this.recordDate = ref.recordDate;
 		this.category = ref.category;
 		this.editorialRank = ref.editorialRank;
+		this.imageUrl = ref.imageUrl;
+		this.sourceLogoUrl = ref.sourceLogoUrl;
 		this.fullXml = ref.fullXml;
 		
 		drugsFound = null;
+		conditionsFound = null;
 	    relevanceValue = null;
 	    firstDrugFound = null;
 	    isRelevant = false;
@@ -55,7 +61,8 @@ public class MoreoverArticle {
 	
 	public MoreoverArticle(int id, int sequenceId, String title, String content, String url, 
 			int sourceId, String sourceName, String sourceUrl, String country, Timestamp publishDate,
-			Timestamp recordDate, String category, String editorialRank, String fullXml) {
+			Timestamp recordDate, String category, String editorialRank, String imageUrl,
+			String sourceLogoUrl, String fullXml) {
 		this.id = id;
 		this.sequenceId = sequenceId;
 		this.title = title;
@@ -69,9 +76,12 @@ public class MoreoverArticle {
 		this.recordDate = recordDate;
 		this.category = category;
 		this.editorialRank = editorialRank;
+		this.imageUrl = imageUrl;
+		this.sourceLogoUrl = sourceLogoUrl;
 		this.fullXml = fullXml;
 		
 		drugsFound = null;
+		conditionsFound = null;
 	    relevanceValue = null;
 	    firstDrugFound = null;
 	    isRelevant = false;
@@ -80,17 +90,8 @@ public class MoreoverArticle {
 	 * declareRelevant: denotes this article as relevant, and initializes all necessary
 	 * variables for a relevant article.
 	 *===============================================================================*/
-	public void declareRelevant(Set<String> drugsFound, String relevanceValue, String firstDrugFound)
-	throws Exception{
-		if (!relevanceValue.equals(RELEVANCY_TITLE_VAL) && 
-				!relevanceValue.equals(RELEVANCY_CONTENT_VAL)) {
-			throw new Exception("must enter predetermined static value for relevanceValue");
-		}
-		
-		this.drugsFound = drugsFound;
-		this.relevanceValue = relevanceValue;
-		this.firstDrugFound = firstDrugFound;
-		
+	public void declareRelevant(String firstDrugFound) throws Exception {
+		this.firstDrugFound = firstDrugFound;		
 		isRelevant = true;
 	}
 	
