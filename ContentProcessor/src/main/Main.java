@@ -1,6 +1,5 @@
 package main;
 
-import java.sql.ResultSet;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -11,20 +10,22 @@ import java.util.Queue;
 import java.util.Vector;
 import java.util.concurrent.Semaphore;
 
-import dbconnect.general.condition_statements;
-import dbconnect.general.moreover_sources_statements;
-import dbconnect.general.product_statements;
 import dbconnect.main.DBConnect;
 import queue.moreover.MoreoverQueueOperator;
 import xmlparser.AuxFileHandling.FieldChainInterpreter;
 import xmlparser.Types.FieldChain;
 
+//TODO: test ahfs data.
 
+//TODO: check writerRUnnable timing issues
 //TODO: side effect checks.
+
 //TODO: ahfs data eventually.
+
+//TODO: reread databse tables every hour or so.
 /*
+ * TODO: change DB connection to local for server version.
  * TODO: check if any thread has been terminated (exception outside loop). restart it if so.
- * 
  * TODO: increase speed. content processor reading about 500 articles per minute, so
  * 		the queries must be set slower to compensate. should be at 500 articles every 12 seconds.
  * 		POSSIBLE SOLUTION: TODO: should be able to dequeue many at a time. 
@@ -33,6 +34,9 @@ import xmlparser.Types.FieldChain;
  * TODO: logging/send emails on exceptions.
  * 		azure log management/log analytics. log4j.
  * TODO: blobUrls aren't actually working. look into this.
+ * TODO: when filtering, check words that appear surrounded by spaces/punctuation, so that we aren't
+ * 		reading instances where the keyword is part of a bigger word.
+ * TODO: figure out dequeue exception issue
 */
 /*================================================================================
  *ContentProcessor
@@ -54,24 +58,10 @@ public class Main {
 	public static final String mainThreadStamp = "(reader main) ";
 	
 	public static Queue<MoreoverArticle> relevantArticleQueue = new LinkedList<MoreoverArticle>();
-	public static Semaphore relevantArticleQueueLock = new Semaphore(1,true);
+	public static Semaphore relevantArticleQueueLock = new Semaphore(1,true);	
 	
-	public static int keyWordMatchThreshold = 3;
-	public static List<String> keyWordList;
-	public static HashMap<String, Integer> conditionsMap;
-	public static HashMap<String,Integer> combinationIdMap;
-	public static HashMap<String,Integer> genericNameMap;
-	public static HashMap<String,Integer> productMap;
-	public static final List<String> categoryList = new  ArrayList<>(Arrays.asList(
-			"academic",
-			"general",
-			"government",
-			"journal",
-			"local",
-			"national",
-			"organization"));
-	public static final List<String> editorialRankList = new ArrayList<>(Arrays.asList(
-			"1","2","3","4"));
+	public static Filter filter = new Filter();
+	
 	public static final List<FieldChain> chainList = (new FieldChainInterpreter()).GetChainsDirect(
 			new ArrayList<>(Arrays.asList( 
 			"TEXT,content",
@@ -89,11 +79,6 @@ public class Main {
 	)));
 	public static FieldChain imageUrlChain;
 	public static FieldChain urlChain;
-	public static final String GEN_LIST_QUERY = "select distinct d.name, d.combination_id, d.id "
-			+ "from product b, combination c, generic_name d "
-			+ "where b.type != 'HUMAN OTC DRUG' "
-			+ "and b.combination_id = c.id "
-			+ "and d.combination_id = c.id";
 	
 	//fixed parameters
 	public static final int QUEUECOUNT = 20;
@@ -112,7 +97,11 @@ public class Main {
 	 *main
 	 *===============================================================================*/
 	public static void main(String[] args) {		
+				
+		printQueueSizes();
+		if (true) { return; }
 		
+		int keyWordMatchThreshold = 3;
 		if (args.length > 0) {
 			try { keyWordMatchThreshold = Integer.parseInt(args[0]); }
 			catch (Exception e) { 
@@ -123,7 +112,7 @@ public class Main {
 		//initialize map so all runnables can be accurately referenced
 		HashMap<Integer,QueueReaderRunnable> runnableMap = 
 				new HashMap<Integer,QueueReaderRunnable>();
-		
+				
 		long startTime = System.currentTimeMillis();
 		
 		try {
@@ -136,14 +125,8 @@ public class Main {
 			chainList.add(imageUrlChain);
 			chainList.add(urlChain);
 			
-			//populate information from database
-			keyWordList = readKeyWords();
-			conditionsMap = readConditionList();
-			combinationIdMap = new HashMap<String,Integer>();
-			genericNameMap = readGenList(combinationIdMap);
-			productMap = readProdList(genericNameMap,combinationIdMap);
-			printToConsole("combination ids found: " + combinationIdMap.size());
-					
+			filter.init(mainThreadStamp, keyWordMatchThreshold);
+			
 			//initialize and execute the queue readers, and store in map
 			for (int i = 0; i < QUEUECOUNT; i++) {
 				QueueReaderRunnable reader = executeQueueReader(i);
@@ -151,7 +134,6 @@ public class Main {
 			}
 			
 			//TODO: check if any thread has been terminated (exception outside loop). restart it if so.
-			
 			
 			//every minute, evaluate status of QueueReader threads, and write all gathered 
 			//information to database and azure cloud storage.
@@ -200,19 +182,13 @@ public class Main {
 	protected static QueueReaderRunnable executeQueueReader(int queueNum) throws Exception {	
 		QueueReaderRunnable reader = new QueueReaderRunnable();
 		reader.queueNum = queueNum;
-		reader.genericNameMap = genericNameMap;
-		reader.productMap = productMap;
-		reader.combinationIdMap = combinationIdMap;
-		reader.categoryList = categoryList;
-		reader.editorialRankList = editorialRankList;
+		reader.filter = filter;
 		reader.chainList = chainList;
 		reader.imageUrlKeyChain = imageUrlChain;
 		reader.urlKeyChain = urlChain;
 
 		reader.relevantArticleQueue = relevantArticleQueue;
 		reader.relevantArticleQueueLock = relevantArticleQueueLock;
-		reader.keyWordMatchThreshold = keyWordMatchThreshold;
-		reader.keyWordList = keyWordList;
 		
 		(new Thread(reader)).start();
 		return reader;
@@ -237,10 +213,7 @@ public class Main {
 		//initialize and execute writer
 		WriterRunnable writer = new WriterRunnable();
 		writer.writeList = writeList;
-		writer.genericNameMap = genericNameMap;
-		writer.productMap = productMap;
-		writer.combinationIdMap = combinationIdMap;
-		writer.conditionsMap = conditionsMap;
+		writer.filter = filter;
 		Thread writerThread = new Thread(writer);
 		writerThread.start();
 		return writer;
@@ -259,7 +232,10 @@ public class Main {
 		long runTimeMillis = System.currentTimeMillis() - startTime;
 		long runTime;
 		String unit;
-		if (runTimeMillis < 2*MILLIS_PER_MINUTE) {
+		if (runTimeMillis < MILLIS_PER_SEC) {
+			runTime = runTimeMillis;
+			unit = "mls";
+		} else if (runTimeMillis < 2*MILLIS_PER_MINUTE) {
 			runTime = runTimeMillis/MILLIS_PER_SEC;
 			unit = "sec";
 		} else if (runTimeMillis < 2*MILLIS_PER_HOUR) {
@@ -274,6 +250,32 @@ public class Main {
 		}		
 		String runTimeString = df.format(runTime);
 		printToConsole(text + ": " + runTimeString + " " + unit);
+		return runTime;
+	}
+	protected static long printCurrentRunTime(long startTime, String text, 
+	String altThreadStamp) {
+		DecimalFormat df = new DecimalFormat("#.00");
+		long runTimeMillis = System.currentTimeMillis() - startTime;
+		long runTime;
+		String unit;
+		if (runTimeMillis < MILLIS_PER_SEC) {
+			runTime = runTimeMillis;
+			unit = "mls";
+		} else if (runTimeMillis < 2*MILLIS_PER_MINUTE) {
+			runTime = runTimeMillis/MILLIS_PER_SEC;
+			unit = "sec";
+		} else if (runTimeMillis < 2*MILLIS_PER_HOUR) {
+			runTime = runTimeMillis/MILLIS_PER_MINUTE;
+			unit = "min";
+		} else if (runTimeMillis < 3*MILLIS_PER_DAY) {
+			runTime = runTimeMillis/MILLIS_PER_HOUR;
+			unit = "hrs";
+		} else {
+			runTime = runTimeMillis/MILLIS_PER_SEC;
+			unit = "days";
+		}		
+		String runTimeString = df.format(runTime);
+		System.out.println(altThreadStamp + " " +  text + ": " + runTimeString + " " + unit);
 		return runTime;
 	}
 	/*================================================================================
@@ -306,129 +308,7 @@ public class Main {
 	protected static void printToConsole(String statement) {
 		System.out.println(mainThreadStamp + statement);
 	}
-	/*================================================================================
-	 * readConditionList: compiles list of unique drugs
-	 *===============================================================================*/
-	protected static HashMap<String,Integer> readConditionList() throws Exception{
 
-		long startTime = System.currentTimeMillis();
-		
-		HashMap<String,Integer> condMap = new HashMap<String,Integer>();
-		
-		//intialize statement
-		String selectQueryProd = condition_statements.Select(new ArrayList<>(
-						Arrays.asList("id","name")));
-		
-		DBConnect con = new DBConnect();
-		connectToDatabase(con);
-		ResultSet rsCond = con.ExecuteQuery(selectQueryProd);
-		con.CommitClose();	
-		
-		//constuct string list from result set
-		while (rsCond.next()) {
-			String temp_condition =  rsCond.getString("name");
-			if (temp_condition == null) {
-				throw new Exception("null drugname found");
-			} else {
-				temp_condition = temp_condition.toLowerCase().replaceAll("[^a-zA-Z0-9]", "").trim();
-			}
-			condMap.put(temp_condition, rsCond.getInt("id"));
-		}
-		
-		printToConsole("read " + condMap.size() + " conditions");			
-		printToConsole("run time:  " + ((System.currentTimeMillis() - startTime)/1000) + " sec");	
-		
-		return condMap;
-	}
-	/*================================================================================
-	 * readGenList: compiles list of unique drugs
-	 *===============================================================================*/
-	protected static HashMap<String,Integer> readGenList(HashMap<String,Integer> combIdMap) 
-			throws Exception{
-
-		long startTime = System.currentTimeMillis();
-		
-		HashMap<String,Integer> genMap = new HashMap<String,Integer>();
-		
-		DBConnect con = new DBConnect();
-		connectToDatabase(con);
-		ResultSet rsGen = con.ExecuteQuery(GEN_LIST_QUERY);
-		con.CommitClose();	
-		
-		//constuct string list from result set
-		while (rsGen.next()) {
-			String temp_drugname =  rsGen.getString("name");
-			if (temp_drugname == null) {
-				throw new Exception("null drugname found");
-			} else {
-				temp_drugname = temp_drugname.toLowerCase().replaceAll("[^a-zA-Z0-9]", "").trim();
-			}
-			genMap.put(temp_drugname, rsGen.getInt("id"));
-			combIdMap.put(temp_drugname, rsGen.getInt("combination_id"));
-		}
-		
-		printToConsole("read " + genMap.size() + " generic names");			
-		printToConsole("run time:  " + ((System.currentTimeMillis() - startTime)/1000) + " sec");	
-		
-		return genMap;
-	
-	}
-	/*================================================================================
-	 * readKeyWords: reads list of keywords from an external file
-	 *===============================================================================*/
-	protected static List<String> readKeyWords() {
-		
-		//TODO: if the file is empty, return zero size list. if this is the case, ignore this
-		//part of the filtering process, and let all files through.
-		
-		printToConsole("readKeyWords function uninitialized. read 0 keywords");
-		return new Vector<String>();		
-	}
-	/*================================================================================
-	 * readProdList: compiles list of unique drugs
-	 *===============================================================================*/
-	protected static HashMap<String,Integer> readProdList(HashMap<String,Integer> genMap, 
-			HashMap<String,Integer> combIdMap) throws Exception{
-
-		long startTime = System.currentTimeMillis();
-		HashMap<String,Integer> prodMap = new HashMap<String,Integer>();
-
-		//intialize statement
-		String selectQueryProd = product_statements.Select(new ArrayList<>(
-				Arrays.asList("name","id","combination_id","type")));
-		
-		//connect and execute statement/retreive data
-		DBConnect con = new DBConnect();
-		connectToDatabase(con);
-		ResultSet rsProd = con.ExecuteQuery(selectQueryProd);
-		con.CommitClose();	
-		
-		//iterate through result list and put entries into product map.
-		while (rsProd.next()) {
-			String temp_drugname =  rsProd.getString("name");
-			
-			//apply all rules, so only the desired names are stored
-			if (temp_drugname == null) {
-				throw new Exception("null drugname found");
-			} 
-			
-			//filter by type
-			if (rsProd.getString("type").trim().equalsIgnoreCase("HUMAN OTC DRUG")) {
-				continue;
-			}
-			
-			temp_drugname = temp_drugname.toLowerCase().replaceAll("[^a-zA-Z0-9]", "").trim();
-			
-			//store in map.
-			prodMap.put(temp_drugname, rsProd.getInt("id")); 
-			combIdMap.put(temp_drugname, rsProd.getInt("combination_id"));	
-		}
-		
-		printToConsole("read " + prodMap.size() + " product names");			
-		printToConsole("run time:  " + ((System.currentTimeMillis() - startTime)/1000) + " sec");	
-		
-		return prodMap;
-	}
 	
 	/*================================================================================
 	 * TESTING/DEBUGGING FUNCTIONS ***************************************************

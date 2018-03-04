@@ -15,7 +15,7 @@ import xmlparser.Types.FieldChain;
 public class Main {
 	
 	//querying parameters
-	public static final int CALL_FREQUENCY_SEC = 30;
+	public static final int CALL_FREQUENCY_SEC = 60;
 	public static final int CALL_FREQUENCY_MILLIS = CALL_FREQUENCY_SEC*1000;
 	public static final int SHORT_PAUSE_MILLIS = 100;
 	public static final int QUEUECOUNT = 20;

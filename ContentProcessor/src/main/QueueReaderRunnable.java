@@ -35,17 +35,12 @@ public class QueueReaderRunnable implements Runnable {
 	public int queueNum = -1;
 	public Queue<MoreoverArticle> relevantArticleQueue = null;
 	public Semaphore relevantArticleQueueLock = null;
-	public HashMap<String,Integer> genericNameMap = null;
-	public HashMap<String,Integer> productMap = null;
-	public HashMap<String,Integer> combinationIdMap = null;
-	public List<String> categoryList = null;
-	public List<String> editorialRankList = null;
 	public List<FieldChain> chainList = null;
 	public FieldChain imageUrlKeyChain = null;
 	public FieldChain urlKeyChain = null;
-	public Exception exc = null;
-	public int keyWordMatchThreshold = -1;
-	public List<String> keyWordList;
+	public Exception exc = null;	
+	public Filter filter = null;
+	
 	
 	//return values
 	public long exceptionCount = 0;
@@ -94,7 +89,7 @@ public class QueueReaderRunnable implements Runnable {
 				MoreoverArticle row = extractData(nextArticle);
 				
 				//if relevant, write to final queue
-				if (checkRelevantArticle(row)) {				
+				if (filter.checkRelevantArticle(row)) {				
 					printToConsole("RELEVANT ARTICLE FOUND (" + row.firstDrugFound + ")");
 					enqueueRelevantArticle(row);
 					relevantArticleCount++;
@@ -125,85 +120,14 @@ public class QueueReaderRunnable implements Runnable {
 					+ "or invalid queueNum specified (" + queueNum + ")");
 		} 
 		threadStamp = "(reader queue_" + queueNum + ") ";
-		if (genericNameMap == null || productMap == null || combinationIdMap == null) {
-			throw new Exception("drug lists not initialized. value is null (" + queueNum + ")");
-		} else if (categoryList == null || editorialRankList == null) {
-			throw new Exception("sources not initialized. value is null (" + queueNum + ")");
+		if (filter == null) {
+			throw new Exception("filter not initialized. value is null (" + queueNum + ")");
 		} else if (chainList == null || imageUrlKeyChain == null || urlKeyChain == null) {
 			throw new Exception("fieldChains not initialized. value is null (" + queueNum + ")");
 		} else if (relevantArticleQueue == null || relevantArticleQueueLock == null) {
 			throw new Exception("relevantArticleQueue values not initialized. "
 					+ "value is null (" + queueNum + ")");
-		} else if (keyWordList == null || keyWordMatchThreshold < 0) {
-			throw new Exception("keyword parameters not initialized" + queueNum + ")");
-		}
-	}
-	/*================================================================================
-	 * checkRelevantArticle: checks whether or not article is desired/relevant. If
-	 * relevant, update the article to represent relevance values, and return true.
-	 *===============================================================================*/
-	protected boolean checkRelevantArticle(MoreoverArticle article) throws Exception {		
-		
-		//FILTER 1: check that the article source is relevant.
-		boolean categoryMatch = false;
-		for (String c: categoryList) {
-			if (c.trim().toLowerCase().equals(article.category.trim().toLowerCase())) {
-				categoryMatch = true;
-				break;
-			}
-		}
-		boolean rankMatch = false;
-		for (String r: editorialRankList) {
-			if (r.trim().toLowerCase().equals(article.editorialRank.trim().toLowerCase())) {
-				rankMatch = true;
-				break;
-			}
-		}
-		if (!categoryMatch || !rankMatch) {
-			return false;
-		}
-		
-		//FILTER 2: horizontal keyword search. only move forward if the requisite amount of
-		//keywords have appeared in the article.
-		int keyWordMatchCount = 0;
-		for (String keyWord: keyWordList) {
-			if (keyWordMatchCount >= keyWordMatchThreshold) { break; }
-			if (WriterRunnable.doesMatch(article.title, keyWord) || 
-					WriterRunnable.doesMatch(article.content, keyWord)){
-				keyWordMatchCount++;
-				continue;
-			}
-		}
-		if (keyWordMatchCount < keyWordMatchThreshold) {
-			return false;
-		}
-		
-		//FILTER 3: do a cursory check to determine whether or not the article has drug information
-		boolean isRelevant = false;
-		String firstDrugFound = null;
-		for (String drug: genericNameMap.keySet()) {
-			if (WriterRunnable.doesMatch(article.title, drug) || 
-					WriterRunnable.doesMatch(article.content, drug)){
-				firstDrugFound = drug;
-				isRelevant = true;
-				break;
-			}
-		}	
-		if (!isRelevant) {
-			for (String drug: productMap.keySet()) {
-				if (WriterRunnable.doesMatch(article.title, drug) || 
-						WriterRunnable.doesMatch(article.content, drug)){
-					firstDrugFound = drug;
-					isRelevant = true;
-					break;
-				}
-			}
-		}
-		
-		if (isRelevant) {
-			article.declareRelevant(firstDrugFound);
-		}
-		return isRelevant;		
+		} 
 	}
 	/*================================================================================
 	 * enqueueRelevantArticle: enqueues a relevant article in the relevantArticleQueue,
