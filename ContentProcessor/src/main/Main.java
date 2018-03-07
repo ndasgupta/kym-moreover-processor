@@ -10,20 +10,17 @@ import java.util.Queue;
 import java.util.Vector;
 import java.util.concurrent.Semaphore;
 
+import Filters.FilterOperator;
 import dbconnect.main.DBConnect;
 import queue.moreover.MoreoverQueueOperator;
 import xmlparser.AuxFileHandling.FieldChainInterpreter;
 import xmlparser.Types.FieldChain;
 
-//TODO: test ahfs data.
 
-//TODO: check writerRUnnable timing issues
 //TODO: side effect checks.
-
-//TODO: ahfs data eventually.
-
 //TODO: reread databse tables every hour or so.
 /*
+ * TODO: figure out dequeue exception issue. internet? try running on dev vm.
  * TODO: change DB connection to local for server version.
  * TODO: check if any thread has been terminated (exception outside loop). restart it if so.
  * TODO: increase speed. content processor reading about 500 articles per minute, so
@@ -36,7 +33,8 @@ import xmlparser.Types.FieldChain;
  * TODO: blobUrls aren't actually working. look into this.
  * TODO: when filtering, check words that appear surrounded by spaces/punctuation, so that we aren't
  * 		reading instances where the keyword is part of a bigger word.
- * TODO: figure out dequeue exception issue
+ * TODO: see if filters can be simplified. make filter class non-abstract, and see how many
+ *		filters can be of the same class.
 */
 /*================================================================================
  *ContentProcessor
@@ -60,7 +58,7 @@ public class Main {
 	public static Queue<MoreoverArticle> relevantArticleQueue = new LinkedList<MoreoverArticle>();
 	public static Semaphore relevantArticleQueueLock = new Semaphore(1,true);	
 	
-	public static Filter filter = new Filter();
+	public static FilterOperator filter = new FilterOperator();
 	
 	public static final List<FieldChain> chainList = (new FieldChainInterpreter()).GetChainsDirect(
 			new ArrayList<>(Arrays.asList( 
@@ -97,9 +95,8 @@ public class Main {
 	 *main
 	 *===============================================================================*/
 	public static void main(String[] args) {		
-				
-		printQueueSizes();
-		if (true) { return; }
+		
+		//if (printQueueSizes()) { return; }
 		
 		int keyWordMatchThreshold = 3;
 		if (args.length > 0) {
@@ -173,7 +170,7 @@ public class Main {
 	 * connectToDatabase: function to be used by all classes in this program for database
 	 * connection. makes sure database being accessed is consistent.
 	 *===============================================================================*/
-	protected static void connectToDatabase(DBConnect connect) throws Exception {
+	public static void connectToDatabase(DBConnect connect) throws Exception {
 		connect.ConnectProd();
 	}
 	/*================================================================================
@@ -316,7 +313,7 @@ public class Main {
 	/*================================================================================
 	 * printQueuesizes: prints sizes of all queues
 	 *===============================================================================*/
-	protected static void printQueueSizes() {
+	protected static boolean printQueueSizes() {
 		MoreoverQueueOperator queueOp = new MoreoverQueueOperator();
 		for (int i = 0; i < QUEUECOUNT; i++) {
 			String queueName = QueueReaderRunnable.QUEUE_PREFIX + i;
@@ -328,6 +325,7 @@ public class Main {
 				System.out.println(queueName + ": EXCEPTION (" + e.getMessage() + ")");
 			}
 		}
+		return true;
 	}
 	
 }

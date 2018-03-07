@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.Semaphore;
 
+import Filters.FilterOperator;
 import queue.moreover.MoreoverQueueOperator;
 import xmlparser.Operations.XMLOperator;
 import xmlparser.Types.FieldChain;
@@ -39,7 +40,7 @@ public class QueueReaderRunnable implements Runnable {
 	public FieldChain imageUrlKeyChain = null;
 	public FieldChain urlKeyChain = null;
 	public Exception exc = null;	
-	public Filter filter = null;
+	public FilterOperator filter = null;
 	
 	
 	//return values
@@ -89,7 +90,7 @@ public class QueueReaderRunnable implements Runnable {
 				MoreoverArticle row = extractData(nextArticle);
 				
 				//if relevant, write to final queue
-				if (filter.checkRelevantArticle(row)) {				
+				if (filter.checkRelevantArticle(threadStamp, row)) {				
 					printToConsole("RELEVANT ARTICLE FOUND (" + row.firstDrugFound + ")");
 					enqueueRelevantArticle(row);
 					relevantArticleCount++;

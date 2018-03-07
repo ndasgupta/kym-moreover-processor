@@ -8,6 +8,7 @@ import java.util.Vector;
 
 import javax.imageio.ImageIO;
 
+import Filters.FilterOperator;
 import blob.moreover.MoreoverBlobOperator;
 import dbconnect.general.document_attributes_row;
 import dbconnect.general.document_attributes_statements;
@@ -42,7 +43,7 @@ public class WriterRunnable implements Runnable{
 
 	//parameters
 	List<MoreoverArticle> writeList = null;	
-	public Filter filter = null;
+	public FilterOperator filter = null;
 	
 	//return values
 	public boolean threadCompleted = false;
@@ -84,29 +85,23 @@ public class WriterRunnable implements Runnable{
 			for (MoreoverArticle article: writeList) {
 				
 				//perform conditions searches on the article.
-				filter.checkDrugNames(article);
-				filter.checkConditions(article);
+				filter.populateRelevantArticle(article);
 				
 				//attempt to write image blobs, and in doing so determine whether or not the
 				//attributes are present.
-				String imageBlobUrl = writeImageBlob(blobOperator, article.sequenceId, article.imageUrl);
-				
+				String imageBlobUrl = writeImageBlob(blobOperator, article.sequenceId, article.imageUrl);				
 				String sourceLogoBlobUrl = 
 						writeImageBlob(blobOperator, article.sequenceId, article.sourceLogoUrl);
-
-				
 				if (imageBlobUrl == null) { writeImage = false; }
 				else { writeImage = true; }
 				if (sourceLogoBlobUrl == null) { writeSourceLogo = false; }
 				else { writeSourceLogo = true; }
 				
 				//Write blob info first, so that generated urls can be used in attributes
-				String blobUrl = blobOperator.writeBlobText(MoreoverBlobOperator.CONTENT_CONTAINER, 
-						"article-"+article.sequenceId+".xml", article.fullXml);
-
-				String summaryBlobUrl = blobOperator.writeBlobText(MoreoverBlobOperator.SUMMARY_CONTAINER, 
-						"article-"+article.sequenceId+".xml", article.fullXml.substring(
-						0,Filter.SNIPPET_LENGTH));
+				String blobUrl = writeTextBlob(blobOperator, MoreoverBlobOperator.CONTENT_CONTAINER, 
+						article);
+				String summaryBlobUrl = writeTextBlob(blobOperator, MoreoverBlobOperator.SUMMARY_CONTAINER,
+						article);
 
 				//initialize database rows
 				document_row doc = initDocumentRow(article);
@@ -227,8 +222,7 @@ public class WriterRunnable implements Runnable{
 	}
 	
 	/*================================================================================
-	 * writeImageBlob: writes an image blob from a given url, and returns the blob
-	 * url.
+	 * writeImageBlob/writeTextBlob: writes blob, and returns the blob url.
 	 *===============================================================================*/
 	protected String writeImageBlob(MoreoverBlobOperator blobOperator, Long articleSeqId,
 	String imageUrl) {
@@ -243,6 +237,11 @@ public class WriterRunnable implements Runnable{
 			printToConsole("image blob exception: " + e.getMessage());
 			return null;
 		}
+	}
+	protected String writeTextBlob(MoreoverBlobOperator blobOperator, String containerName, 
+	MoreoverArticle article) throws Exception{
+		return blobOperator.writeBlobText(containerName, "article-"+article.sequenceId+".xml", 
+				article.fullXml);
 	}
 	/*================================================================================
 	 * writeFinalLists: writes final attribute and relation lists, accounting for the
