@@ -40,8 +40,7 @@ public class QueueReaderRunnable implements Runnable {
 	public FieldChain imageUrlKeyChain = null;
 	public FieldChain urlKeyChain = null;
 	public Exception exc = null;	
-	public FilterOperator filter = null;
-	
+	public FilterOperator filter = null;	
 	
 	//return values
 	public long exceptionCount = 0;
@@ -49,7 +48,8 @@ public class QueueReaderRunnable implements Runnable {
 	public long relevantArticleCount = 0;
 	
 	//fixed parameters
-	private static final int SLEEP_TIME_MILLIS = 2000;
+	private static final int MIN_QUEUE_SIZE = 400;
+	private static final int SHORT_SLEEP_TIME_MILLIS = 2000;
 	public static final String QUEUE_PREFIX = "moreover-queue-";
 
 		
@@ -76,16 +76,22 @@ public class QueueReaderRunnable implements Runnable {
 		
 		//continuously dequeue and process messages
 		while (!terminate) {
-			try {
+			try {				
+				
+				while (queueOp.getQueueLength(queueName) < MIN_QUEUE_SIZE) {				
+					Thread.sleep(SHORT_SLEEP_TIME_MILLIS);
+				}
+				
 				//dequeue next message
-				String nextArticle = null;
-				try  { nextArticle = queueOp.dequeue(queueName); }
-				catch (NullPointerException ne) {
-					Thread.sleep(SLEEP_TIME_MILLIS);
+				String nextArticle;
+				try { nextArticle = queueOp.dequeue(queueName); }
+				catch (NullPointerException npe) { nextArticle = null; }
+				if (nextArticle == null) {					
 					continue;
 				}
+
 				articleCount++;
-				
+			
 				//extract data and check if relevant
 				MoreoverArticle row = extractData(nextArticle);
 				

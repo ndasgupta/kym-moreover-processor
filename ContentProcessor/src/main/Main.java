@@ -4,13 +4,19 @@ import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
+import java.util.Set;
 import java.util.Vector;
 import java.util.concurrent.Semaphore;
 
 import Filters.FilterOperator;
+import blob.moreover.MoreoverBlobOperator;
+import dbconnect.general.document_attributes_statements;
+import dbconnect.general.document_relation_statements;
+import dbconnect.general.document_statements;
 import dbconnect.main.DBConnect;
 import queue.moreover.MoreoverQueueOperator;
 import xmlparser.AuxFileHandling.FieldChainInterpreter;
@@ -19,22 +25,15 @@ import xmlparser.Types.FieldChain;
 
 //TODO: side effect checks.
 //TODO: reread databse tables every hour or so.
+//TODO: still getting many split message misalignments.
 /*
- * TODO: figure out dequeue exception issue. internet? try running on dev vm.
  * TODO: change DB connection to local for server version.
- * TODO: check if any thread has been terminated (exception outside loop). restart it if so.
- * TODO: increase speed. content processor reading about 500 articles per minute, so
- * 		the queries must be set slower to compensate. should be at 500 articles every 12 seconds.
- * 		POSSIBLE SOLUTION: TODO: should be able to dequeue many at a time. 
- * 			this is a change that must be made in AzureStorageConnect in the database workspace.
- * 		IDEAS: try time the cloud dequeue process and other things. Try dequeueing multiple at a time.
  * TODO: logging/send emails on exceptions.
  * 		azure log management/log analytics. log4j.
  * TODO: blobUrls aren't actually working. look into this.
  * TODO: when filtering, check words that appear surrounded by spaces/punctuation, so that we aren't
  * 		reading instances where the keyword is part of a bigger word.
- * TODO: see if filters can be simplified. make filter class non-abstract, and see how many
- *		filters can be of the same class.
+ * TODO: incorporate ahfs brand names
 */
 /*================================================================================
  *ContentProcessor
@@ -48,6 +47,11 @@ import xmlparser.Types.FieldChain;
  *the database. In specifying which of these we want to look at, discretion is
  *applied. The second place is in the QueueReaderRunnable class, exclusively in the
  *checkRelevantArticle function.
+ *
+ *known edge cases:
+ *
+ *1. queueReader hits end of queue while querier is entering into queue, resulting
+ *		in a possible split message misalignment.
  *===============================================================================*/
 
 public class Main {
@@ -81,10 +85,10 @@ public class Main {
 	//fixed parameters
 	public static final int QUEUECOUNT = 20;
 	public static final int MILLIS_PER_SEC = 1000;
-	public static final int MILLIS_PER_MINUTE = 60*MILLIS_PER_SEC;
-	public static final int MILLIS_PER_HOUR = 60*MILLIS_PER_MINUTE;
+	public static final int MILLIS_PER_MIN = 60*MILLIS_PER_SEC;
+	public static final int MILLIS_PER_HOUR = 60*MILLIS_PER_MIN;
 	public static final int MILLIS_PER_DAY = 24*MILLIS_PER_HOUR;
-	public static final int THREAD_SLEEP_TIME_MILLIS = 1*MILLIS_PER_MINUTE;
+	public static final int THREAD_SLEEP_TIME_MILLIS = 1*MILLIS_PER_MIN;
 	public static final int THREAD_SLEEP_TIME_MILLIS_SHORT = 1000;
 	
 	public static long exceptionCountLast;
@@ -96,7 +100,7 @@ public class Main {
 	 *===============================================================================*/
 	public static void main(String[] args) {		
 		
-		//if (printQueueSizes()) { return; }
+		if (printQueueSizes()) { return; }
 		
 		int keyWordMatchThreshold = 3;
 		if (args.length > 0) {
@@ -109,6 +113,7 @@ public class Main {
 		//initialize map so all runnables can be accurately referenced
 		HashMap<Integer,QueueReaderRunnable> runnableMap = 
 				new HashMap<Integer,QueueReaderRunnable>();
+		HashMap<Integer,Thread> threadMap = new HashMap<Integer, Thread>();
 				
 		long startTime = System.currentTimeMillis();
 		
@@ -126,12 +131,9 @@ public class Main {
 			
 			//initialize and execute the queue readers, and store in map
 			for (int i = 0; i < QUEUECOUNT; i++) {
-				QueueReaderRunnable reader = executeQueueReader(i);
-				runnableMap.put(i, reader);
+				executeQueueReader(i, runnableMap, threadMap);
 			}
-			
-			//TODO: check if any thread has been terminated (exception outside loop). restart it if so.
-			
+						
 			//every minute, evaluate status of QueueReader threads, and write all gathered 
 			//information to database and azure cloud storage.
 			WriterRunnable writer = new WriterRunnable();
@@ -154,8 +156,13 @@ public class Main {
 					}
 				}
 				
-
 				printThreadPoolStatus(runnableMap, startTime, localExceptionCount);
+				
+				//check for dead threads, and re-execute if any are found.
+				Set<Integer> deadList = checkDeadThreads(threadMap);
+				for (Integer i: deadList) {
+					executeQueueReader(i,runnableMap,threadMap);
+				}
 				
 				writer = executeWriter();
 			}
@@ -167,6 +174,20 @@ public class Main {
 		
 	}
 	/*================================================================================
+	 * checkDeadThreads: checks for dead threads, and returns numbers
+	 *===============================================================================*/
+	public static Set<Integer> checkDeadThreads(HashMap<Integer,Thread> threadMap) 
+	throws Exception {
+		Set<Integer> deadList = new HashSet<Integer>();
+		for (Integer i: threadMap.keySet()) {
+			if (!threadMap.get(i).isAlive()) {
+				deadList.add(i);
+				printToConsole("found dead thread: " + i);
+			}
+		}
+		return deadList;
+	}
+	/*================================================================================
 	 * connectToDatabase: function to be used by all classes in this program for database
 	 * connection. makes sure database being accessed is consistent.
 	 *===============================================================================*/
@@ -174,9 +195,12 @@ public class Main {
 		connect.ConnectProd();
 	}
 	/*================================================================================
-	 * executeQueuReader: initializes, executes and returns a QueueReaderRunnable
+	 * executeQueuReader: initializes and executes a queue reader, recording the runnable
+	 * and thread objects in the argument maps.
 	 *===============================================================================*/
-	protected static QueueReaderRunnable executeQueueReader(int queueNum) throws Exception {	
+	protected static void executeQueueReader(int queueNum, 
+	HashMap<Integer,QueueReaderRunnable> runnableMap, HashMap<Integer,Thread> threadMap) 
+	throws Exception {	
 		QueueReaderRunnable reader = new QueueReaderRunnable();
 		reader.queueNum = queueNum;
 		reader.filter = filter;
@@ -187,8 +211,11 @@ public class Main {
 		reader.relevantArticleQueue = relevantArticleQueue;
 		reader.relevantArticleQueueLock = relevantArticleQueueLock;
 		
-		(new Thread(reader)).start();
-		return reader;
+		Thread t = new Thread(reader);
+		threadMap.put(queueNum, t);
+		runnableMap.put(queueNum, reader);
+		
+		t.start();	
 	}
 	/*================================================================================
 	 * executeWriter: initializes, executes and returns a WriterRunnable
@@ -222,7 +249,8 @@ public class Main {
 		return System.currentTimeMillis() - startTime;
 	}
 	/*================================================================================
-	 * printCurrentRunTime: given start time, prints current run time in seconds
+	 * printCurrentRunTime: given start time, prints current run time in an
+	 * appropriate unit of measurement
 	 *===============================================================================*/
 	protected static long printCurrentRunTime(long startTime, String text) {
 		DecimalFormat df = new DecimalFormat("#.00");
@@ -232,11 +260,11 @@ public class Main {
 		if (runTimeMillis < MILLIS_PER_SEC) {
 			runTime = runTimeMillis;
 			unit = "mls";
-		} else if (runTimeMillis < 2*MILLIS_PER_MINUTE) {
+		} else if (runTimeMillis < 2*MILLIS_PER_MIN) {
 			runTime = runTimeMillis/MILLIS_PER_SEC;
 			unit = "sec";
 		} else if (runTimeMillis < 2*MILLIS_PER_HOUR) {
-			runTime = runTimeMillis/MILLIS_PER_MINUTE;
+			runTime = runTimeMillis/MILLIS_PER_MIN;
 			unit = "min";
 		} else if (runTimeMillis < 3*MILLIS_PER_DAY) {
 			runTime = runTimeMillis/MILLIS_PER_HOUR;
@@ -258,11 +286,11 @@ public class Main {
 		if (runTimeMillis < MILLIS_PER_SEC) {
 			runTime = runTimeMillis;
 			unit = "mls";
-		} else if (runTimeMillis < 2*MILLIS_PER_MINUTE) {
+		} else if (runTimeMillis < 2*MILLIS_PER_MIN) {
 			runTime = runTimeMillis/MILLIS_PER_SEC;
 			unit = "sec";
 		} else if (runTimeMillis < 2*MILLIS_PER_HOUR) {
-			runTime = runTimeMillis/MILLIS_PER_MINUTE;
+			runTime = runTimeMillis/MILLIS_PER_MIN;
 			unit = "min";
 		} else if (runTimeMillis < 3*MILLIS_PER_DAY) {
 			runTime = runTimeMillis/MILLIS_PER_HOUR;
@@ -311,6 +339,99 @@ public class Main {
 	 * TESTING/DEBUGGING FUNCTIONS ***************************************************
 	 *===============================================================================*/
 	/*================================================================================
+	 * clearAllData: deletes all Moreover data
+	 *===============================================================================*/
+	protected static boolean clearAllData() {
+		
+		clearBlobContainers();
+		clearFromDatabase();
+		clearQueues();
+		
+		printToConsole("waiting 30 seconds to attempt recreating blob containers...");
+		try { Thread.sleep(30000); }
+		catch (Exception e) {}
+		
+		createBlobContainers();
+
+		return true;
+	}
+	/*================================================================================
+	 * clearBlobContainers: deletes and recreates all blob containers
+	 *===============================================================================*/
+	protected static boolean clearBlobContainers() {
+		MoreoverBlobOperator blobOp = new MoreoverBlobOperator();
+		try {
+			blobOp.connect(MoreoverBlobOperator.CONTENT_CONTAINER);
+			blobOp.clearContainer(MoreoverBlobOperator.CONTENT_CONTAINER);
+			printToConsole("content container deleted.");
+			
+			blobOp.connect(MoreoverBlobOperator.IMAGE_CONTAINER);
+			blobOp.clearContainer(MoreoverBlobOperator.IMAGE_CONTAINER);
+			printToConsole("image container deleted.");
+
+			blobOp.connect(MoreoverBlobOperator.SOURCELOGO_CONTAINER);
+			blobOp.clearContainer(MoreoverBlobOperator.SOURCELOGO_CONTAINER);
+			printToConsole("source logo container deleted.");
+
+			blobOp.connect(MoreoverBlobOperator.SUMMARY_CONTAINER);
+			blobOp.clearContainer(MoreoverBlobOperator.SUMMARY_CONTAINER);
+			printToConsole("summary container deleted.");
+		} catch (Exception e) {
+			printToConsole("EXCEPTION (" + e.getMessage() + ")");
+		}
+		return true;
+	}
+	/*================================================================================
+	 * clearFromDatabase: clears all moreover information from database
+	 *===============================================================================*/
+	protected static boolean clearFromDatabase() {
+		DBConnect con = new DBConnect();
+		try {
+			connectToDatabase(con);
+			con.ExecuteStatement(document_attributes_statements.truncate());
+			printToConsole("attributes truncated.");
+			con.ExecuteStatement(document_relation_statements.truncate());
+			printToConsole("relations truncated.");
+			con.ExecuteStatement(document_statements.truncate());
+			printToConsole("document truncated.");
+		} catch (Exception e) {
+			printToConsole("EXCEPTION (" + e.getMessage() + ")");
+		}
+		return true;
+	}
+	/*================================================================================
+	 * clearQueues: clears all queues
+	 *===============================================================================*/
+	protected static boolean clearQueues() {
+		MoreoverQueueOperator queueOp = new MoreoverQueueOperator();
+		for (int i = 0; i < QUEUECOUNT; i++) {
+			String queueName = QueueReaderRunnable.QUEUE_PREFIX + i;
+			try {
+				queueOp.connectQueue(queueName);
+				queueOp.clearQueue(queueName);
+				printToConsole(queueName + " cleared");
+			} catch (Exception e) {
+				printToConsole(queueName + ": EXCEPTION (" + e.getMessage() + ")");
+			}
+		}
+		return true;
+	}
+	/*================================================================================
+	 * createBlobContainers: creates all blob containers
+	 *===============================================================================*/
+	public static boolean createBlobContainers() {
+		MoreoverBlobOperator blobOp = new MoreoverBlobOperator();
+		try {
+			blobOp.connect(MoreoverBlobOperator.CONTENT_CONTAINER);
+			blobOp.connect(MoreoverBlobOperator.IMAGE_CONTAINER);
+			blobOp.connect(MoreoverBlobOperator.SOURCELOGO_CONTAINER);
+			blobOp.connect(MoreoverBlobOperator.SUMMARY_CONTAINER);
+		} catch (Exception e) {
+			printToConsole("EXCEPTION (" + e.getMessage() + ")");
+		}
+		return true;
+	}
+	/*================================================================================
 	 * printQueuesizes: prints sizes of all queues
 	 *===============================================================================*/
 	protected static boolean printQueueSizes() {
@@ -320,9 +441,9 @@ public class Main {
 			try {
 				queueOp.connectQueue(queueName);
 				long queueSize = queueOp.getQueueLength(queueName);
-				System.out.println(queueName + ": " + queueSize);
+				printToConsole(queueName + ": " + queueSize);
 			} catch (Exception e) {
-				System.out.println(queueName + ": EXCEPTION (" + e.getMessage() + ")");
+				printToConsole(queueName + ": EXCEPTION (" + e.getMessage() + ")");
 			}
 		}
 		return true;

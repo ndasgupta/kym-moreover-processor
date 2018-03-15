@@ -89,9 +89,10 @@ public class WriterRunnable implements Runnable{
 				
 				//attempt to write image blobs, and in doing so determine whether or not the
 				//attributes are present.
-				String imageBlobUrl = writeImageBlob(blobOperator, article.sequenceId, article.imageUrl);				
-				String sourceLogoBlobUrl = 
-						writeImageBlob(blobOperator, article.sequenceId, article.sourceLogoUrl);
+				String imageBlobUrl = writeImageBlob(blobOperator, MoreoverBlobOperator.IMAGE_CONTAINER, 
+						article, article.imageUrl);				
+				String sourceLogoBlobUrl = writeImageBlob(blobOperator, 
+						MoreoverBlobOperator.SOURCELOGO_CONTAINER, article, article.sourceLogoUrl);
 				if (imageBlobUrl == null) { writeImage = false; }
 				else { writeImage = true; }
 				if (sourceLogoBlobUrl == null) { writeSourceLogo = false; }
@@ -224,15 +225,15 @@ public class WriterRunnable implements Runnable{
 	/*================================================================================
 	 * writeImageBlob/writeTextBlob: writes blob, and returns the blob url.
 	 *===============================================================================*/
-	protected String writeImageBlob(MoreoverBlobOperator blobOperator, Long articleSeqId,
-	String imageUrl) {
+	protected String writeImageBlob(MoreoverBlobOperator blobOperator, String containerName, 
+			MoreoverArticle article, String imageUrl) {
 		
 		if (imageUrl == null) { return null; }
 		try {
 			URL imgUrl = new URL(imageUrl);
 			BufferedImage img = ImageIO.read(imgUrl);
 			return blobOperator.writeBlobImage(MoreoverBlobOperator.IMAGE_CONTAINER, 
-					"image-"+articleSeqId+".jpg", img);
+					"image-"+ article.sequenceId +".jpg", img);
 		} catch(Exception e) {
 			printToConsole("image blob exception: " + e.getMessage());
 			return null;

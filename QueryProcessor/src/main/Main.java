@@ -15,7 +15,7 @@ import xmlparser.Types.FieldChain;
 public class Main {
 	
 	//querying parameters
-	public static final int CALL_FREQUENCY_SEC = 60;
+	public static final int CALL_FREQUENCY_SEC = 12;
 	public static final int CALL_FREQUENCY_MILLIS = CALL_FREQUENCY_SEC*1000;
 	public static final int SHORT_PAUSE_MILLIS = 100;
 	public static final int QUEUECOUNT = 20;
@@ -77,7 +77,10 @@ public class Main {
 					if (waitTime > 0) {
 						Thread.sleep(waitTime);
 					}
-				} else { printToConsole("call frequency wait time exceeded."); }
+				} else { 
+					printToConsole("call frequency wait time exceeded (" + 
+							getCurrentRunTimeSec(lastQueryStart) + " sec)"); 
+				}
 				
 				//intialize and run query, recording start time
 				QueryRunnable querier = executeQueryRunnable((int)(i%QUEUECOUNT), currSeqId, chromeClient);
@@ -103,7 +106,7 @@ public class Main {
 				printToConsole("iteration complete. count: " + i);
 				if (i%QUEUECOUNT == 0) {
 					printToConsole("exception count: " + exceptionCount);
-					printCurrentRunTimeDays(globalStartTime, "current run time: ");
+					printCurrentRunTime(globalStartTime, "current run time: ");
 				}
 				
 			} catch(Exception e) {				
@@ -138,25 +141,33 @@ public class Main {
 	 * printCurrentRunTime: given start time, prints current run time in the specified
 	 * unit of measurement.
 	 *===============================================================================*/
-	protected static long printCurrentRunTimeSec(long startTime, String text) throws Exception {
+	/*================================================================================
+	 * printCurrentRunTime: given start time, prints current run time in an
+	 * appropriate unit of measurement
+	 *===============================================================================*/
+	protected static long printCurrentRunTime(long startTime, String text) {
 		DecimalFormat df = new DecimalFormat("#.00");
-		long runTime = (System.currentTimeMillis() - startTime)/MILLIS_PER_SEC;		
+		long runTimeMillis = System.currentTimeMillis() - startTime;
+		long runTime;
+		String unit;
+		if (runTimeMillis < MILLIS_PER_SEC) {
+			runTime = runTimeMillis;
+			unit = "mls";
+		} else if (runTimeMillis < 2*MILLIS_PER_MIN) {
+			runTime = runTimeMillis/MILLIS_PER_SEC;
+			unit = "sec";
+		} else if (runTimeMillis < 2*MILLIS_PER_HOUR) {
+			runTime = runTimeMillis/MILLIS_PER_MIN;
+			unit = "min";
+		} else if (runTimeMillis < 3*MILLIS_PER_DAY) {
+			runTime = runTimeMillis/MILLIS_PER_HOUR;
+			unit = "hrs";
+		} else {
+			runTime = runTimeMillis/MILLIS_PER_SEC;
+			unit = "days";
+		}		
 		String runTimeString = df.format(runTime);
-		printToConsole(text + ": " + runTimeString + " sec");
-		return runTime;
-	}
-	protected static long printCurrentRunTimeHours(long startTime, String text) throws Exception {
-		DecimalFormat df = new DecimalFormat("#.00");
-		long runTime = (System.currentTimeMillis() - startTime)/MILLIS_PER_HOUR;		
-		String runTimeString = df.format(runTime);
-		printToConsole(text + ": " + runTimeString + " hours");
-		return runTime;
-	}
-	protected static long printCurrentRunTimeDays(long startTime, String text) throws Exception {
-		DecimalFormat df = new DecimalFormat("#.000");
-		long runTime = (System.currentTimeMillis() - startTime)/MILLIS_PER_DAY;		
-		String runTimeString = df.format(runTime);
-		printToConsole(text + ": " + runTimeString + " days");
+		printToConsole(text + ": " + runTimeString + " " + unit);
 		return runTime;
 	}
 	/*================================================================================
