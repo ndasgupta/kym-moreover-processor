@@ -1,5 +1,7 @@
 package Filters;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.util.List;
 import java.util.Set;
 import java.util.Vector;
@@ -11,6 +13,8 @@ public class KeywordFilter extends Filter {
 
 	public static List<String> keywordList;
 	public static int matchThreshold = 3;
+	public static final String FILEPATH = "/Users/nikhildasgupta/Desktop/Work/KnowYourMeds/"
+			+ "runtime_ref_files/medicalKeyWordList.txt";
 	
 	@Override
 	public void initialize(String threadStamp, boolean active) throws Exception {
@@ -24,9 +28,24 @@ public class KeywordFilter extends Filter {
 		this.active = active;
 		if (!active) { return; }
 		
-		printToConsole(threadStamp, "readKeyWords function uninitialized. read 0 keywords");
 		KeywordFilter.matchThreshold = matchThreshold;
 		keywordList =  new Vector<String>();	
+		
+		FileReader fileReader = new FileReader(FILEPATH);
+		BufferedReader bufferedReader = new BufferedReader(fileReader);
+		String line;
+		
+		while ((line = bufferedReader.readLine()) != null) {
+			keywordList.add(line);
+		}
+		
+		fileReader.close();
+		
+		for (String s: keywordList) {
+			System.out.println(s);
+		}
+	
+		
 	}
 	
 	@Override

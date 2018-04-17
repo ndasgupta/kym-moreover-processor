@@ -48,17 +48,17 @@ public class FilterOperator {
 				
 		editorialRankFilter.initialize(threadStamp, true);
 		
-		genericNamesFilter.initialize(threadStamp, combIdMap, false);
+		genericNamesFilter.initialize(threadStamp, combIdMap, true);
 		
-		productsFilter.initialize(threadStamp, genericNamesFilter.getMap(), combIdMap, false);
+		productsFilter.initialize(threadStamp, combIdMap, true);
 		
-		combinationFilter.initialize(threadStamp, combIdMap, false);
+		combinationFilter.initialize(threadStamp, combIdMap, true);
 		
 		conditionsFilter.initialize(threadStamp, true);
 		
-		keywordFilter.initialize(threadStamp, matchThreshold, true);
+		keywordFilter.initialize(threadStamp, matchThreshold, false);
 		
-		queryFilter.initialize(threadStamp, true);
+		queryFilter.initialize(threadStamp, false);	
 		
 		initialized = true;
 	}
@@ -130,22 +130,17 @@ public class FilterOperator {
 		
 		Set<String> namesFound = new HashSet<String>();
 		Set<String> conditionsFound = new HashSet<String>();
-		String relevanceValue = null;
 		
 		queryFilter.populateArticle(article, namesFound);
 		
-		relevanceValue = genericNamesFilter.populateArticle(article, namesFound);
+		String genRelevanceValue = genericNamesFilter.populateArticle(article, namesFound);
 		
-		String productRelevanceValue = productsFilter.populateArticle(article, namesFound);
+		String prodRelevanceValue = productsFilter.populateArticle(article, namesFound);
 		
-		conditionsFilter.populateArticle(article, conditionsFound);
+		conditionsFilter.populateArticle(article, conditionsFound);		
 		
-		
-		if (relevanceValue != MoreoverArticle.RELEVANCY_TITLE_VAL) {
-			relevanceValue = productRelevanceValue;
-		}
 		article.drugsFound = namesFound;
-		article.relevanceValue = relevanceValue;
+		article.relevanceValue = getRelevanceValue(genRelevanceValue, prodRelevanceValue);
 		article.conditionsFound = conditionsFound;
 		
 	}
@@ -154,6 +149,20 @@ public class FilterOperator {
 	 *===============================================================================*/
 	protected static void printToConsole(String threadStamp, String statement) {
 		System.out.println(threadStamp + statement);
+	}
+	/*================================================================================
+	 * getRelevanceValue: determines relevance value based on two relevance inputs
+	 *===============================================================================*/
+	protected static String getRelevanceValue(String val1, String val2) {
+		if (val1 == MoreoverArticle.RELEVANCY_TITLE_VAL || 
+				val2 == MoreoverArticle.RELEVANCY_TITLE_VAL ) {
+			return MoreoverArticle.RELEVANCY_TITLE_VAL;
+		}
+		else if (val1 == MoreoverArticle.RELEVANCY_CONTENT_VAL || 
+				val2 == MoreoverArticle.RELEVANCY_CONTENT_VAL ) {
+			return MoreoverArticle.RELEVANCY_CONTENT_VAL;
+		}
+		else return null;
 	}
 
 }

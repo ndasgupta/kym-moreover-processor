@@ -21,8 +21,8 @@ public class ProductsFilter extends Filter {
 		this.active = initializeSpecific(threadStamp, active);	
 	}
 
-	public void initialize(String threadStamp, HashMap<String,Integer> genMap, 
-	HashMap<String,Integer> combIdMap, boolean active) throws Exception{
+	public void initialize(String threadStamp, HashMap<String,Integer> combIdMap, 
+	boolean active) throws Exception{
 
 		this.active = active;
 		if (!active) { return; }
@@ -50,7 +50,7 @@ public class ProductsFilter extends Filter {
 			} 
 			
 			//filter by type
-			if (rsProd.getString("type").trim().equalsIgnoreCase("HUMAN OTC DRUG")) {
+			if (!(rsProd.getString("type").trim().equalsIgnoreCase("HUMAN PRESCRIPTION DRUG"))) {
 				continue;
 			}
 			
@@ -64,6 +64,7 @@ public class ProductsFilter extends Filter {
 		printToConsole(threadStamp, "read " + prodMap.size() + " product names");			
 		printToConsole(threadStamp, "run time:  " + 
 				((System.currentTimeMillis() - startTime)/1000) + " sec");	
+		
 		
 		queryMap = prodMap;
 		
@@ -105,6 +106,10 @@ public class ProductsFilter extends Filter {
 	public void populateRelation(String query, document_relation_row relation) throws Exception {
 		if (!active) { return; }
 		relation.product_id = queryMap.get(query);
+	}
+	
+	public HashMap<String,Integer> getMap() {
+		return queryMap;
 	}
 
 }

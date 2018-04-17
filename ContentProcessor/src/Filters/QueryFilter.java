@@ -90,5 +90,9 @@ public class QueryFilter extends Filter {
 		if (!active) { return; }
 		relation.query_id = queryMap.get(query);
 	}
+	
+	public HashMap<String,Integer> getMap() {
+		return queryMap;
+	}
 
 }

@@ -25,7 +25,6 @@ import xmlparser.Types.FieldChain;
 
 //TODO: side effect checks.
 //TODO: reread databse tables every hour or so.
-//TODO: still getting many split message misalignments.
 /*
  * TODO: change DB connection to local for server version.
  * TODO: logging/send emails on exceptions.
@@ -33,7 +32,6 @@ import xmlparser.Types.FieldChain;
  * TODO: blobUrls aren't actually working. look into this.
  * TODO: when filtering, check words that appear surrounded by spaces/punctuation, so that we aren't
  * 		reading instances where the keyword is part of a bigger word.
- * TODO: incorporate ahfs brand names
 */
 /*================================================================================
  *ContentProcessor
@@ -100,7 +98,7 @@ public class Main {
 	 *===============================================================================*/
 	public static void main(String[] args) {		
 		
-		if (printQueueSizes()) { return; }
+		//if (printQueueSizes()) { return; }
 		
 		int keyWordMatchThreshold = 3;
 		if (args.length > 0) {

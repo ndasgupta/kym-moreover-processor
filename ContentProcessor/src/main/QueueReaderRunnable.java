@@ -97,7 +97,7 @@ public class QueueReaderRunnable implements Runnable {
 				
 				//if relevant, write to final queue
 				if (filter.checkRelevantArticle(threadStamp, row)) {				
-					printToConsole("RELEVANT ARTICLE FOUND (" + row.firstDrugFound + ")");
+					//printToConsole("RELEVANT ARTICLE FOUND (" + row.firstDrugFound + ")");
 					enqueueRelevantArticle(row);
 					relevantArticleCount++;
 				}
